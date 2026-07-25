@@ -34,6 +34,12 @@ export default function Home() {
   const [countQty, setCountQty] = useState<string>("");
   const [isSaving, setIsSaving] = useState<boolean>(false);
   const [lastSaved, setLastSaved] = useState<string>("");
+
+  // State cho phần Ngoài danh mục (Bước 4)
+  const [outsideBarcode, setOutsideBarcode] = useState<string>("");
+  const [outsideName, setOutsideName] = useState<string>("");
+  const [outsideUnit, setOutsideUnit] = useState<string>("Cái");
+  const [outsideQty, setOutsideQty] = useState<string>("");
   
   const [progress, setProgress] = useState<any>(null);
   const [loadingProgress, setLoadingProgress] = useState<boolean>(false);
@@ -124,8 +130,7 @@ export default function Home() {
       barcode: maVach, 
       name: String(item[6] || ""), 
       unit: String(item[8] || "-"), 
-      sysQty: sysQty,
-      isOutside: false
+      sysQty: sysQty
     });
     
     setSearchQuery(""); 
@@ -134,48 +139,7 @@ export default function Home() {
     setStep(3);
   };
 
-  // Xử lý khi quét hoặc nhập mã chưa có trong danh mục -> Hỏi để lưu vào ngoài danh mục
-  const handleUnknownCode = (scannedCode: string) => {
-    const customName = prompt(`❌ Mã "${scannedCode}" không có trong danh mục chính!\n\nNhập TÊN SẢN PHẨM để lưu vào ngoài danh mục:`);
-    if (!customName || !customName.trim()) return;
-
-    const unitInput = prompt("Nhập Đơn vị tính (Ví dụ: Hộp, Cái, Bao, Lọ...):", "Cái") || "Cái";
-    const qtyInput = prompt("Nhập số lượng kiểm kê thực tế:", "1");
-    if (qtyInput === null) return;
-
-    saveOutsideProduct({
-      store,
-      barcode: scannedCode,
-      name: customName.trim(),
-      countQty: parseFloat(qtyInput) || 0,
-      unit: unitInput,
-      userName
-    });
-  };
-
-  const saveOutsideProduct = async (payload: any) => {
-    setIsSaving(true);
-    try {
-      const res = await fetch('/api/save-outside', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
-      const result = await res.json();
-      if (result.success) {
-        setLastSaved(`✅ Đã lưu ngoài danh mục: ${payload.name} (SL: ${payload.countQty})`);
-        setStep(2);
-        loadProgress(store);
-      } else {
-        alert("Lỗi: " + result.error);
-      }
-    } catch (e) {
-      alert("Lỗi kết nối mạng khi lưu ngoài danh mục!");
-    }
-    setIsSaving(false);
-  };
-
-  // Camera Trực Tiếp (Hỗ trợ iOS / Android mượt mà)
+  // Camera Trực Tiếp
   const toggleLiveCamera = async () => {
     if (isScanningLive) {
       setIsScanningLive(false);
@@ -204,19 +168,25 @@ export default function Home() {
               if (found) {
                 selectProduct(found);
               } else {
-                handleUnknownCode(decodedText);
+                // Nếu quét không thấy -> tự động điền mã vào form Ngoài danh mục và chuyển sang Bước 4
+                setOutsideBarcode(decodedText);
+                setOutsideName("");
+                setOutsideUnit("Cái");
+                setOutsideQty("");
+                setStep(4);
               }
             },
             () => {}
           );
         } catch (err) {
-          alert("❌ Không thể mở camera. Vui lòng cấp quyền camera trong Safari/Trình duyệt!");
+          alert("❌ Không thể mở camera. Vui lòng cấp quyền camera trong trình duyệt!");
           setIsScanningLive(false);
         }
       }, 300);
     }
   };
 
+  // Lưu sản phẩm chính (Bước 3)
   const handleSave = async () => {
     if (countQty === "") return alert("Vui lòng nhập số lượng kiểm kê thực tế!");
     setIsSaving(true);
@@ -255,6 +225,42 @@ export default function Home() {
       alert("❌ Lỗi mạng, không thể kết nối đến máy chủ!"); 
     }
     
+    setIsSaving(false);
+  };
+
+  // Lưu sản phẩm ngoài danh mục (Bước 4)
+  const handleSaveOutside = async () => {
+    if (!outsideBarcode.trim()) return alert("Vui lòng nhập mã vạch / mã hàng!");
+    if (!outsideName.trim()) return alert("Vui lòng nhập tên sản phẩm!");
+    if (outsideQty === "") return alert("Vui lòng nhập số lượng thực tế!");
+
+    setIsSaving(true);
+    const payload = {
+      store,
+      barcode: outsideBarcode.trim(),
+      name: outsideName.trim(),
+      countQty: parseFloat(outsideQty) || 0,
+      unit: outsideUnit.trim(),
+      userName
+    };
+
+    try {
+      const res = await fetch('/api/save-outside', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      const result = await res.json();
+      if (result.success) {
+        setLastSaved(`✅ Đã lưu ngoài danh mục: ${outsideName} (SL: ${outsideQty})`);
+        setStep(2);
+        loadProgress(store);
+      } else {
+        alert("Lỗi: " + result.error);
+      }
+    } catch (e) {
+      alert("Lỗi kết nối mạng khi lưu ngoài danh mục!");
+    }
     setIsSaving(false);
   };
 
@@ -415,11 +421,25 @@ export default function Home() {
 
           {/* Nút bật/tắt camera trực tiếp */}
           <button 
-            className={`btn ${isScanningLive ? 'btn-danger' : 'btn-success'} w-100 py-3 mb-3 fw-bold shadow-sm`} 
+            className={`btn ${isScanningLive ? 'btn-danger' : 'btn-success'} w-100 py-3 mb-2 fw-bold shadow-sm`} 
             style={{fontSize: '18px'}}
             onClick={toggleLiveCamera}
           >
             {isScanningLive ? "🛑 TẮT CAMERA QUÉT" : "📷 MỞ CAMERA QUÉT TRỰC TIẾP"}
+          </button>
+
+          {/* Nút bấm thủ công chuyển sang thêm ngoài danh mục */}
+          <button 
+            className="btn btn-warning w-100 py-2 mb-3 fw-bold shadow-sm text-dark" 
+            onClick={() => {
+              setOutsideBarcode("");
+              setOutsideName("");
+              setOutsideUnit("Cái");
+              setOutsideQty("");
+              setStep(4);
+            }}
+          >
+            ➕ Thêm sản phẩm ngoài danh mục
           </button>
 
           <div 
@@ -460,7 +480,7 @@ export default function Home() {
         </div>
       )}
 
-      {/* BƯỚC 3: NHẬP SỐ LƯỢNG VÀ LƯU */}
+      {/* BƯỚC 3: NHẬP SỐ LƯỢNG VÀ LƯU (SẢN PHẨM TRONG DANH MỤC) */}
       {step === 3 && selectedProduct && (
         <div className="card p-4 shadow border-0 rounded-4">
           <h5 className="text-primary fw-bold mb-3 border-bottom pb-2">Sản phẩm tìm thấy</h5>
@@ -486,6 +506,74 @@ export default function Home() {
             disabled={isSaving}
           >
             {isSaving ? "⏳ ĐANG LƯU VÀO GOOGLE SHEETS..." : "💾 LƯU KIỂM KÊ"}
+          </button>
+          
+          <button 
+            className="btn btn-outline-secondary w-100 fw-bold" 
+            onClick={() => setStep(2)} 
+            disabled={isSaving}
+          >
+            Hủy & Quay lại
+          </button>
+        </div>
+      )}
+
+      {/* BƯỚC 4: FORM NHẬP SẢN PHẨM NGOÀI DANH MỤC */}
+      {step === 4 && (
+        <div className="card p-4 shadow border-0 rounded-4 bg-white">
+          <h5 className="text-warning fw-bold mb-3 border-bottom pb-2 text-dark">⚠️ Thêm Sản Phẩm Ngoài Danh Mục</h5>
+
+          <div className="mb-3">
+            <label className="form-label fw-bold">Mã vạch / Mã hàng:</label>
+            <input 
+              type="text" 
+              className="form-control form-control-lg bg-light" 
+              placeholder="Nhập hoặc quét mã..." 
+              value={outsideBarcode} 
+              onChange={(e) => setOutsideBarcode(e.target.value)}
+              autoFocus
+            />
+          </div>
+
+          <div className="mb-3">
+            <label className="form-label fw-bold">Tên sản phẩm:</label>
+            <input 
+              type="text" 
+              className="form-control form-control-lg bg-light" 
+              placeholder="Nhập tên sản phẩm..." 
+              value={outsideName} 
+              onChange={(e) => setOutsideName(e.target.value)}
+            />
+          </div>
+
+          <div className="mb-3">
+            <label className="form-label fw-bold">Đơn vị tính (ĐVT):</label>
+            <input 
+              type="text" 
+              className="form-control form-control-lg bg-light" 
+              placeholder="Ví dụ: Hộp, Cái, Lọ, Bao..." 
+              value={outsideUnit} 
+              onChange={(e) => setOutsideUnit(e.target.value)}
+            />
+          </div>
+
+          <div className="mb-4">
+            <label className="form-label fw-bold">📦 Số lượng thực tế:</label>
+            <input 
+              type="number" 
+              className="form-control form-control-lg bg-light border-primary" 
+              placeholder="Nhập số lượng thực tế..." 
+              value={outsideQty} 
+              onChange={(e) => setOutsideQty(e.target.value)}
+            />
+          </div>
+          
+          <button 
+            className="btn btn-warning btn-lg w-100 fw-bold mb-3 shadow-sm text-dark" 
+            onClick={handleSaveOutside} 
+            disabled={isSaving}
+          >
+            {isSaving ? "⏳ ĐANG LƯU VÀO SHEET NGOÀI..." : "💾 LƯU VÀO NGOÀI DANH MỤC"}
           </button>
           
           <button 
