@@ -4,7 +4,6 @@ import React, { useState, useEffect } from 'react';
 import 'bootstrap/dist/css/bootstrap.min.css';
 import * as XLSX from 'xlsx';
 
-// Danh sách cửa hàng
 const STORES: string[] = [
   "Kho Địa điểm kinh doanh Q7", "Kho Địa điểm kinh doanh 01", 
   "Kho Địa điểm kinh doanh 02", "Kho Địa điểm kinh doanh 03",
@@ -12,7 +11,6 @@ const STORES: string[] = [
   "Kho Địa điểm kinh doanh 06", "Kho Tổng công ty"
 ];
 
-// Hàm hỗ trợ ép kiểu số lượng
 const parseQty = (val: any): number => {
   if (val === "" || val === null || val === undefined) return 0;
   if (typeof val === 'number') return val;
@@ -22,31 +20,27 @@ const parseQty = (val: any): number => {
 };
 
 export default function Home() {
-  // States tải dữ liệu ban đầu
   const [data, setData] = useState<{ tonKho: any[]; danhMuc: any[] }>({ tonKho: [], danhMuc: [] });
   const [loading, setLoading] = useState<boolean>(true);
   
-  // States điều hướng các bước
   const [step, setStep] = useState<number>(0); 
   const [userName, setUserName] = useState<string>("");
   const [store, setStore] = useState<string>("");
   
-  // States tìm kiếm và kết quả
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [searchResults, setSearchResults] = useState<any[]>([]);
   
-  // States xử lý nhập số lượng và lưu
   const [selectedProduct, setSelectedProduct] = useState<any>(null);
   const [countQty, setCountQty] = useState<string>("");
   const [isSaving, setIsSaving] = useState<boolean>(false);
   const [lastSaved, setLastSaved] = useState<string>("");
   
-  // States cho tiến độ và xuất Excel
   const [progress, setProgress] = useState<any>(null);
   const [loadingProgress, setLoadingProgress] = useState<boolean>(false);
   const [isExporting, setIsExporting] = useState<boolean>(false);
 
-  // Kéo dữ liệu khi mở web & kiểm tra đăng nhập
+  const [isScanningLive, setIsScanningLive] = useState<boolean>(false);
+
   useEffect(() => {
     const savedName = localStorage.getItem("kiemke_username");
     if (savedName) {
@@ -66,15 +60,11 @@ export default function Home() {
       });
   }, []);
 
-  // Hàm tải dữ liệu Tiến Độ
   const loadProgress = async (storeName: string) => {
     setLoadingProgress(true);
     try {
       const res = await fetch(`/api/progress?store=${encodeURIComponent(storeName)}`);
-      if (!res.ok) { 
-        setLoadingProgress(false); 
-        return; 
-      }
+      if (!res.ok) { setLoadingProgress(false); return; }
       const result = await res.json();
       if (result.success) setProgress(result.data);
     } catch (e) {
@@ -83,7 +73,6 @@ export default function Home() {
     setLoadingProgress(false);
   };
 
-  // Hàm Đăng nhập & Đăng xuất
   const handleLogin = () => {
     if (!userName.trim()) return alert("Vui lòng nhập tên của bạn để tiếp tục!");
     localStorage.setItem("kiemke_username", userName.trim());
@@ -97,7 +86,6 @@ export default function Home() {
     setStep(0);
   };
 
-  // Hàm Tìm Kiếm
   const handleSearch = (e: React.ChangeEvent<HTMLInputElement>) => {
     const query = e.target.value;
     setSearchQuery(query);
@@ -110,18 +98,15 @@ export default function Home() {
     const qClean = query.toLowerCase().trim();
     const results = data.danhMuc.filter((row: any) => {
       if(row.length < 7 || !row[6] || String(row[6]).trim() === "") return false;
-      
       const ma = String(row[0]).toLowerCase();
       const maVach = String(row[2] || "").toLowerCase();
       const ten = String(row[6]).toLowerCase();
-      
       return ma.includes(qClean) || maVach.includes(qClean) || ten.includes(qClean);
     }).slice(0, 15);
     
     setSearchResults(results);
   };
 
-  // Hàm Chọn sản phẩm (Đã map chuẩn xác Mã hàng và Mã vạch)
   const selectProduct = (item: any) => {
     const maHang = String(item[0]).trim();
     const maVach = String(item[2] || "").trim();
@@ -139,7 +124,8 @@ export default function Home() {
       barcode: maVach, 
       name: String(item[6] || ""), 
       unit: String(item[8] || "-"), 
-      sysQty: sysQty
+      sysQty: sysQty,
+      isOutside: false
     });
     
     setSearchQuery(""); 
@@ -148,28 +134,89 @@ export default function Home() {
     setStep(3);
   };
 
-  // Hàm Quét Camera
-  const handleScanImage = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (!e.target.files || e.target.files.length === 0) return;
-    const file = e.target.files[0];
+  // Xử lý khi quét hoặc nhập mã chưa có trong danh mục -> Hỏi để lưu vào ngoài danh mục
+  const handleUnknownCode = (scannedCode: string) => {
+    const customName = prompt(`❌ Mã "${scannedCode}" không có trong danh mục chính!\n\nNhập TÊN SẢN PHẨM để lưu vào ngoài danh mục:`);
+    if (!customName || !customName.trim()) return;
+
+    const unitInput = prompt("Nhập Đơn vị tính (Ví dụ: Hộp, Cái, Bao, Lọ...):", "Cái") || "Cái";
+    const qtyInput = prompt("Nhập số lượng kiểm kê thực tế:", "1");
+    if (qtyInput === null) return;
+
+    saveOutsideProduct({
+      store,
+      barcode: scannedCode,
+      name: customName.trim(),
+      countQty: parseFloat(qtyInput) || 0,
+      unit: unitInput,
+      userName
+    });
+  };
+
+  const saveOutsideProduct = async (payload: any) => {
+    setIsSaving(true);
     try {
-      const { Html5Qrcode } = await import('html5-qrcode');
-      const html5QrCode = new Html5Qrcode("reader-hidden");
-      const result = await html5QrCode.scanFile(file, true);
-      const qClean = result.toLowerCase().trim();
-      const found = data.danhMuc.find((row: any) => 
-        String(row[0]).toLowerCase().trim() === qClean || 
-        String(row[2]).toLowerCase().trim() === qClean
-      );
-      
-      if (found) selectProduct(found); 
-      else alert(`❌ Quét được mã: ${result}\nNhưng mã này chưa có trong danh mục!`);
-    } catch (err) { 
-      alert("❌ Không nhận diện được mã vạch trong ảnh, vui lòng chụp rõ nét hơn!"); 
+      const res = await fetch('/api/save-outside', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      const result = await res.json();
+      if (result.success) {
+        setLastSaved(`✅ Đã lưu ngoài danh mục: ${payload.name} (SL: ${payload.countQty})`);
+        setStep(2);
+        loadProgress(store);
+      } else {
+        alert("Lỗi: " + result.error);
+      }
+    } catch (e) {
+      alert("Lỗi kết nối mạng khi lưu ngoài danh mục!");
+    }
+    setIsSaving(false);
+  };
+
+  // Camera Trực Tiếp (Hỗ trợ iOS / Android mượt mà)
+  const toggleLiveCamera = async () => {
+    if (isScanningLive) {
+      setIsScanningLive(false);
+      try {
+        const { Html5Qrcode } = await import('html5-qrcode');
+        const scanner = new Html5Qrcode("reader-container");
+        await scanner.stop();
+      } catch (e) {}
+    } else {
+      setIsScanningLive(true);
+      setTimeout(async () => {
+        try {
+          const { Html5Qrcode } = await import('html5-qrcode');
+          const scanner = new Html5Qrcode("reader-container");
+          await scanner.start(
+            { facingMode: "environment" },
+            { fps: 10, qrbox: { width: 250, height: 150 } },
+            (decodedText) => {
+              scanner.stop().catch(() => {});
+              setIsScanningLive(false);
+              const qClean = decodedText.toLowerCase().trim();
+              const found = data.danhMuc.find((row: any) => 
+                String(row[0]).toLowerCase().trim() === qClean || 
+                String(row[2]).toLowerCase().trim() === qClean
+              );
+              if (found) {
+                selectProduct(found);
+              } else {
+                handleUnknownCode(decodedText);
+              }
+            },
+            () => {}
+          );
+        } catch (err) {
+          alert("❌ Không thể mở camera. Vui lòng cấp quyền camera trong Safari/Trình duyệt!");
+          setIsScanningLive(false);
+        }
+      }, 300);
     }
   };
 
-  // Hàm Lưu Kiểm Kê
   const handleSave = async () => {
     if (countQty === "") return alert("Vui lòng nhập số lượng kiểm kê thực tế!");
     setIsSaving(true);
@@ -198,7 +245,6 @@ export default function Home() {
       const result = await res.json();
       
       if (result.success) {
-        // Fix hiển thị đúng số lượng thực tế vừa nhập thay vì số lượng hệ thống
         setLastSaved(`✅ Đã lưu: ${selectedProduct.name} (SL Thực Tế: ${thucTeVal})`);
         setStep(2); 
         loadProgress(store);
@@ -212,7 +258,6 @@ export default function Home() {
     setIsSaving(false);
   };
 
-  // Hàm Xuất Excel Báo Cáo
   const handleExportReport = async () => {
     setIsExporting(true);
     try {
@@ -220,7 +265,6 @@ export default function Home() {
       if (!res.ok) throw new Error("Lỗi Server khi tải báo cáo");
       
       const result = await res.json();
-      
       if (!result.success) {
         alert("Lỗi xuất dữ liệu: " + result.error);
         setIsExporting(false); 
@@ -228,7 +272,6 @@ export default function Home() {
       }
       
       const reportData = result.data;
-      
       const formattedData = reportData.map((item: any) => ({
         "Mã hàng": item.maHang,
         "Tên hàng": item.tenHang,
@@ -240,11 +283,9 @@ export default function Home() {
       }));
 
       const worksheet = XLSX.utils.json_to_sheet(formattedData);
-      
-      const wscols = [
+      worksheet['!cols'] = [
         {wch: 15}, {wch: 50}, {wch: 8}, {wch: 12}, {wch: 12}, {wch: 12}, {wch: 15}
       ];
-      worksheet['!cols'] = wscols;
 
       const workbook = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(workbook, worksheet, "BaoCaoKiemKe");
@@ -279,8 +320,6 @@ export default function Home() {
           </div>
         </div>
       )}
-
-      <div id="reader-hidden" style={{ display: 'none' }}></div>
 
       {/* BƯỚC 0: ĐĂNG NHẬP */}
       {step === 0 && (
@@ -374,16 +413,20 @@ export default function Home() {
 
           {lastSaved && <div className="alert alert-success py-2 small fw-bold shadow-sm">{lastSaved}</div>}
 
-          <label className="btn btn-success w-100 py-3 mb-4 fw-bold shadow-sm" style={{fontSize: '18px', cursor: 'pointer'}}>
-            📷 CHỤP ẢNH QUÉT MÃ
-            <input 
-              type="file" 
-              accept="image/*" 
-              capture="environment" 
-              className="d-none" 
-              onChange={handleScanImage} 
-            />
-          </label>
+          {/* Nút bật/tắt camera trực tiếp */}
+          <button 
+            className={`btn ${isScanningLive ? 'btn-danger' : 'btn-success'} w-100 py-3 mb-3 fw-bold shadow-sm`} 
+            style={{fontSize: '18px'}}
+            onClick={toggleLiveCamera}
+          >
+            {isScanningLive ? "🛑 TẮT CAMERA QUÉT" : "📷 MỞ CAMERA QUÉT TRỰC TIẾP"}
+          </button>
+
+          <div 
+            id="reader-container" 
+            className="w-100 mb-4 rounded-3 overflow-hidden shadow-sm" 
+            style={{ display: isScanningLive ? 'block' : 'none', minHeight: '300px', backgroundColor: '#000' }}
+          ></div>
 
           <label className="form-label fw-bold text-primary">🔍 Nhập mã hoặc tên sản phẩm:</label>
           <div className="position-relative">
