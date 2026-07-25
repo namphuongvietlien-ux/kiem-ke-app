@@ -1,4 +1,5 @@
 'use client';
+
 import React, { useState, useEffect } from 'react';
 import 'bootstrap/dist/css/bootstrap.min.css';
 import * as XLSX from 'xlsx';
@@ -11,7 +12,7 @@ const STORES: string[] = [
   "Kho Địa điểm kinh doanh 06", "Kho Tổng công ty"
 ];
 
-// Hàm hỗ trợ ép kiểu số lượng (Đã thêm kiểu dữ liệu `: any` để qua TypeScript)
+// Hàm hỗ trợ ép kiểu số lượng
 const parseQty = (val: any): number => {
   if (val === "" || val === null || val === undefined) return 0;
   if (typeof val === 'number') return val;
@@ -60,7 +61,7 @@ export default function Home() {
         setLoading(false);
       })
       .catch(err => {
-        console.error("Lỗi tải dữ liệu RAM:", err);
+        console.error("Lỗi tải dữ liệu:", err);
         setLoading(false);
       });
   }, []);
@@ -120,10 +121,12 @@ export default function Home() {
     setSearchResults(results);
   };
 
-  // Hàm Chọn sản phẩm
+  // Hàm Chọn sản phẩm (Đã map chuẩn xác Mã hàng và Mã vạch)
   const selectProduct = (item: any) => {
     const maHang = String(item[0]).trim();
+    const maVach = String(item[2] || "").trim();
     let sysQty = 0;
+    
     const tonRow = data.tonKho.find((r: any) => 
       String(r[0]).trim().toLowerCase() === store.trim().toLowerCase() && 
       String(r[1]).trim() === maHang
@@ -132,8 +135,8 @@ export default function Home() {
     if (tonRow) sysQty = parseQty(tonRow[7]);
     
     setSelectedProduct({
-      barcode: maHang, 
-      maVach: String(item[2] || ""), 
+      maHang: maHang, 
+      barcode: maVach, 
       name: String(item[6] || ""), 
       unit: String(item[8] || "-"), 
       sysQty: sysQty
@@ -171,14 +174,16 @@ export default function Home() {
     if (countQty === "") return alert("Vui lòng nhập số lượng kiểm kê thực tế!");
     setIsSaving(true);
     
-    const diff = parseFloat(countQty) - selectedProduct.sysQty;
+    const thucTeVal = parseFloat(countQty);
+    const diff = thucTeVal - selectedProduct.sysQty;
+    
     const payload = {
       store, 
-      barcode: selectedProduct.barcode, 
+      barcode: selectedProduct.maHang, 
       name: selectedProduct.name,
       sysQty: selectedProduct.sysQty, 
-      countQty: parseFloat(countQty),
-      maVach: selectedProduct.maVach, 
+      countQty: thucTeVal,
+      maVach: selectedProduct.barcode, 
       unit: selectedProduct.unit, 
       diff, 
       userName
@@ -193,7 +198,8 @@ export default function Home() {
       const result = await res.json();
       
       if (result.success) {
-        setLastSaved(`✅ Đã lưu: ${selectedProduct.name} (SL: ${countQty})`);
+        // Fix hiển thị đúng số lượng thực tế vừa nhập thay vì số lượng hệ thống
+        setLastSaved(`✅ Đã lưu: ${selectedProduct.name} (SL Thực Tế: ${thucTeVal})`);
         setStep(2); 
         loadProgress(store);
       } else {
@@ -236,13 +242,7 @@ export default function Home() {
       const worksheet = XLSX.utils.json_to_sheet(formattedData);
       
       const wscols = [
-        {wch: 15},
-        {wch: 50},
-        {wch: 8},
-        {wch: 12},
-        {wch: 12},
-        {wch: 12},
-        {wch: 15}
+        {wch: 15}, {wch: 50}, {wch: 8}, {wch: 12}, {wch: 12}, {wch: 12}, {wch: 15}
       ];
       worksheet['!cols'] = wscols;
 
@@ -417,15 +417,15 @@ export default function Home() {
         </div>
       )}
 
-      {/* BƯỚC 3: NHẬP SỐ LƯỢNG VA LƯU */}
+      {/* BƯỚC 3: NHẬP SỐ LƯỢNG VÀ LƯU */}
       {step === 3 && selectedProduct && (
         <div className="card p-4 shadow border-0 rounded-4">
           <h5 className="text-primary fw-bold mb-3 border-bottom pb-2">Sản phẩm tìm thấy</h5>
-          <p className="mb-1"><strong>Mã hàng:</strong> {selectedProduct.barcode}</p>
+          
+          <p className="mb-1"><strong>Mã hàng:</strong> {selectedProduct.maHang}</p>
+          <p className="mb-1"><strong>Mã vạch:</strong> <span className="text-success fw-bold">{selectedProduct.barcode || "N/A"}</span></p>
           <p className="mb-1"><strong>Tên:</strong> {selectedProduct.name}</p>
-          <p className="mb-3">
-            <strong>Tồn hệ thống:</strong> <span className="text-danger fw-bold fs-5">{selectedProduct.sysQty}</span> {selectedProduct.unit}
-          </p>
+          <p className="mb-3"><strong>Tồn hệ thống:</strong> <span className="text-danger fw-bold fs-5">{selectedProduct.sysQty}</span> {selectedProduct.unit}</p>
 
           <label className="form-label fw-bold mt-2">📦 Số lượng kiểm kê thực tế:</label>
           <input 
