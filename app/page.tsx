@@ -13,10 +13,14 @@ const STORES: string[] = [
 
 const parseQty = (val: any): number => {
   if (val === "" || val === null || val === undefined) return 0;
-  if (typeof val === 'number') return val;
-  let str = val.toString().trim().replace(/\./g, '').replace(/,/g, '.');
-  const num = parseFloat(str);
-  return isNaN(num) ? 0 : num;
+  if (typeof val === 'number') return Math.round(val);
+  
+  let str = val.toString().trim();
+  
+  // Nếu chuỗi chứa dấu chấm hoặc phẩy động (vd: "47.00", "9.00", "21.00")
+  const num = parseFloat(str.replace(',', '.'));
+  
+  return isNaN(num) ? 0 : Math.round(num);
 };
 
 export default function Home() {
