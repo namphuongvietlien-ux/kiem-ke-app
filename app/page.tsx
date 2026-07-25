@@ -1,18 +1,18 @@
 'use client';
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import 'bootstrap/dist/css/bootstrap.min.css';
-import * as XLSX from 'xlsx'; // Thư viện xuất file Excel
+import * as XLSX from 'xlsx';
 
 // Danh sách cửa hàng
-const STORES = [
+const STORES: string[] = [
   "Kho Địa điểm kinh doanh Q7", "Kho Địa điểm kinh doanh 01", 
   "Kho Địa điểm kinh doanh 02", "Kho Địa điểm kinh doanh 03",
   "Kho Địa điểm kinh doanh 04", "Kho Địa điểm kinh doanh 05",
   "Kho Địa điểm kinh doanh 06", "Kho Tổng công ty"
 ];
 
-// Hàm hỗ trợ ép kiểu số lượng từ định dạng số Việt Nam/Châu Âu
-const parseQty = (val) => {
+// Hàm hỗ trợ ép kiểu số lượng (Đã thêm kiểu dữ liệu `: any` để qua TypeScript)
+const parseQty = (val: any): number => {
   if (val === "" || val === null || val === undefined) return 0;
   if (typeof val === 'number') return val;
   let str = val.toString().trim().replace(/\./g, '').replace(/,/g, '.');
@@ -22,28 +22,28 @@ const parseQty = (val) => {
 
 export default function Home() {
   // States tải dữ liệu ban đầu
-  const [data, setData] = useState({ tonKho: [], danhMuc: [] });
-  const [loading, setLoading] = useState(true);
+  const [data, setData] = useState<{ tonKho: any[]; danhMuc: any[] }>({ tonKho: [], danhMuc: [] });
+  const [loading, setLoading] = useState<boolean>(true);
   
   // States điều hướng các bước
-  const [step, setStep] = useState(0); 
-  const [userName, setUserName] = useState("");
-  const [store, setStore] = useState("");
+  const [step, setStep] = useState<number>(0); 
+  const [userName, setUserName] = useState<string>("");
+  const [store, setStore] = useState<string>("");
   
   // States tìm kiếm và kết quả
-  const [searchQuery, setSearchQuery] = useState("");
-  const [searchResults, setSearchResults] = useState([]);
+  const [searchQuery, setSearchQuery] = useState<string>("");
+  const [searchResults, setSearchResults] = useState<any[]>([]);
   
   // States xử lý nhập số lượng và lưu
-  const [selectedProduct, setSelectedProduct] = useState(null);
-  const [countQty, setCountQty] = useState("");
-  const [isSaving, setIsSaving] = useState(false);
-  const [lastSaved, setLastSaved] = useState("");
+  const [selectedProduct, setSelectedProduct] = useState<any>(null);
+  const [countQty, setCountQty] = useState<string>("");
+  const [isSaving, setIsSaving] = useState<boolean>(false);
+  const [lastSaved, setLastSaved] = useState<string>("");
   
   // States cho tiến độ và xuất Excel
-  const [progress, setProgress] = useState(null);
-  const [loadingProgress, setLoadingProgress] = useState(false);
-  const [isExporting, setIsExporting] = useState(false);
+  const [progress, setProgress] = useState<any>(null);
+  const [loadingProgress, setLoadingProgress] = useState<boolean>(false);
+  const [isExporting, setIsExporting] = useState<boolean>(false);
 
   // Kéo dữ liệu khi mở web & kiểm tra đăng nhập
   useEffect(() => {
@@ -66,7 +66,7 @@ export default function Home() {
   }, []);
 
   // Hàm tải dữ liệu Tiến Độ
-  const loadProgress = async (storeName) => {
+  const loadProgress = async (storeName: string) => {
     setLoadingProgress(true);
     try {
       const res = await fetch(`/api/progress?store=${encodeURIComponent(storeName)}`);
@@ -97,8 +97,7 @@ export default function Home() {
   };
 
   // Hàm Tìm Kiếm
-  // Hàm Tìm Kiếm (Đã fix lỗi hiển thị dòng trống)
-  const handleSearch = (e) => {
+  const handleSearch = (e: React.ChangeEvent<HTMLInputElement>) => {
     const query = e.target.value;
     setSearchQuery(query);
     
@@ -108,8 +107,7 @@ export default function Home() {
     }
     
     const qClean = query.toLowerCase().trim();
-    const results = data.danhMuc.filter(row => {
-      // LOẠI BỎ NGAY: Nếu dòng bị thiếu dữ liệu, hoặc không có tên sản phẩm (Cột G - index 6), hoặc tên toàn dấu cách
+    const results = data.danhMuc.filter((row: any) => {
       if(row.length < 7 || !row[6] || String(row[6]).trim() === "") return false;
       
       const ma = String(row[0]).toLowerCase();
@@ -121,11 +119,12 @@ export default function Home() {
     
     setSearchResults(results);
   };
+
   // Hàm Chọn sản phẩm
-  const selectProduct = (item) => {
+  const selectProduct = (item: any) => {
     const maHang = String(item[0]).trim();
     let sysQty = 0;
-    const tonRow = data.tonKho.find(r => 
+    const tonRow = data.tonKho.find((r: any) => 
       String(r[0]).trim().toLowerCase() === store.trim().toLowerCase() && 
       String(r[1]).trim() === maHang
     );
@@ -147,7 +146,7 @@ export default function Home() {
   };
 
   // Hàm Quét Camera
-  const handleScanImage = async (e) => {
+  const handleScanImage = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!e.target.files || e.target.files.length === 0) return;
     const file = e.target.files[0];
     try {
@@ -155,7 +154,7 @@ export default function Home() {
       const html5QrCode = new Html5Qrcode("reader-hidden");
       const result = await html5QrCode.scanFile(file, true);
       const qClean = result.toLowerCase().trim();
-      const found = data.danhMuc.find(row => 
+      const found = data.danhMuc.find((row: any) => 
         String(row[0]).toLowerCase().trim() === qClean || 
         String(row[2]).toLowerCase().trim() === qClean
       );
@@ -196,7 +195,7 @@ export default function Home() {
       if (result.success) {
         setLastSaved(`✅ Đã lưu: ${selectedProduct.name} (SL: ${countQty})`);
         setStep(2); 
-        loadProgress(store); // Tải lại thanh tiến độ
+        loadProgress(store);
       } else {
         alert("❌ Lỗi từ server: " + result.error);
       }
@@ -224,8 +223,7 @@ export default function Home() {
       
       const reportData = result.data;
       
-      // Định dạng lại tiêu đề cột cho đẹp
-      const formattedData = reportData.map(item => ({
+      const formattedData = reportData.map((item: any) => ({
         "Mã hàng": item.maHang,
         "Tên hàng": item.tenHang,
         "ĐVT": item.dvt,
@@ -235,22 +233,19 @@ export default function Home() {
         "Trạng thái": item.trangThai
       }));
 
-      // Tạo Sheet
       const worksheet = XLSX.utils.json_to_sheet(formattedData);
       
-      // Tùy chỉnh độ rộng các cột trong Excel
       const wscols = [
-        {wch: 15}, // Mã hàng
-        {wch: 50}, // Tên hàng
-        {wch: 8},  // ĐVT
-        {wch: 12}, // Hệ thống
-        {wch: 12}, // Thực tế
-        {wch: 12}, // Chênh lệch
-        {wch: 15}  // Trạng thái
+        {wch: 15},
+        {wch: 50},
+        {wch: 8},
+        {wch: 12},
+        {wch: 12},
+        {wch: 12},
+        {wch: 15}
       ];
       worksheet['!cols'] = wscols;
 
-      // Tạo File (Workbook) và tải xuống
       const workbook = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(workbook, worksheet, "BaoCaoKiemKe");
       
@@ -264,7 +259,6 @@ export default function Home() {
     setIsExporting(false);
   };
 
-  // MÀN HÌNH CHỜ (LOADING SCREEN)
   if (loading) {
     return (
       <div className="d-flex justify-content-center align-items-center vh-100">
@@ -276,7 +270,6 @@ export default function Home() {
   return (
     <div className="container mt-4 pb-5" style={{ maxWidth: '600px' }}>
       
-      {/* HEADER CHO CÁC BƯỚC > 0 */}
       {step > 0 && (
         <div className="d-flex justify-content-between align-items-center mb-4 pb-2 border-bottom">
           <h5 className="text-primary fw-bold m-0">Kiểm Kê Kho</h5>
@@ -287,7 +280,6 @@ export default function Home() {
         </div>
       )}
 
-      {/* DIV ẨN CHO CAMERA */}
       <div id="reader-hidden" style={{ display: 'none' }}></div>
 
       {/* BƯỚC 0: ĐĂNG NHẬP */}
@@ -319,7 +311,7 @@ export default function Home() {
             onChange={(e) => setStore(e.target.value)}
           >
             <option value="">-- Chọn cửa hàng --</option>
-            {STORES.map(s => <option key={s} value={s}>{s}</option>)}
+            {STORES.map((s: string) => <option key={s} value={s}>{s}</option>)}
           </select>
           <button 
             className="btn btn-primary btn-lg w-100 fw-bold shadow-sm" 
@@ -344,7 +336,6 @@ export default function Home() {
             <button className="btn btn-sm btn-outline-secondary" onClick={() => setStep(1)}>Đổi kho</button>
           </div>
 
-          {/* VÙNG TIẾN ĐỘ VÀ XUẤT EXCEL */}
           <div className="mb-4 bg-light p-3 rounded-3 border position-relative">
             {loadingProgress ? (
               <div className="text-center text-muted small">⏳ Đang cập nhật tiến độ...</div>
@@ -368,7 +359,6 @@ export default function Home() {
                   <span>Khớp: <strong className="text-success">{progress.matchCount}</strong> | Lệch: <strong className="text-danger">{progress.diffCount}</strong></span>
                 </div>
                 
-                {/* NÚT TẢI BÁO CÁO EXCEL */}
                 <button 
                   className="btn btn-outline-primary btn-sm w-100 fw-bold" 
                   onClick={handleExportReport}
@@ -382,10 +372,8 @@ export default function Home() {
             )}
           </div>
 
-          {/* THÔNG BÁO LƯU THÀNH CÔNG GẦN NHẤT */}
           {lastSaved && <div className="alert alert-success py-2 small fw-bold shadow-sm">{lastSaved}</div>}
 
-          {/* NÚT CAMERA */}
           <label className="btn btn-success w-100 py-3 mb-4 fw-bold shadow-sm" style={{fontSize: '18px', cursor: 'pointer'}}>
             📷 CHỤP ẢNH QUÉT MÃ
             <input 
@@ -397,7 +385,6 @@ export default function Home() {
             />
           </label>
 
-          {/* THANH TÌM KIẾM */}
           <label className="form-label fw-bold text-primary">🔍 Nhập mã hoặc tên sản phẩm:</label>
           <div className="position-relative">
             <input 
@@ -409,10 +396,9 @@ export default function Home() {
               autoComplete="off"
             />
             
-            {/* DANH SÁCH GỢI Ý KẾT QUẢ TÌM KIẾM (Đã fix hiển thị ĐVT) */}
             {searchResults.length > 0 && (
               <ul className="list-group position-absolute w-100 shadow-lg mt-1" style={{ zIndex: 1000, maxHeight: '300px', overflowY: 'auto' }}>
-                {searchResults.map((item, idx) => (
+                {searchResults.map((item: any, idx: number) => (
                   <li 
                     key={idx} 
                     className="list-group-item list-group-item-action" 
@@ -431,7 +417,7 @@ export default function Home() {
         </div>
       )}
 
-      {/* BƯỚC 3: XÁC NHẬN SỐ LƯỢNG VÀ LƯU */}
+      {/* BƯỚC 3: NHẬP SỐ LƯỢNG VA LƯU */}
       {step === 3 && selectedProduct && (
         <div className="card p-4 shadow border-0 rounded-4">
           <h5 className="text-primary fw-bold mb-3 border-bottom pb-2">Sản phẩm tìm thấy</h5>
