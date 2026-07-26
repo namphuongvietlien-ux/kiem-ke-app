@@ -14,12 +14,8 @@ const STORES: string[] = [
 const parseQty = (val: any): number => {
   if (val === "" || val === null || val === undefined) return 0;
   if (typeof val === 'number') return Math.round(val);
-  
   let str = val.toString().trim();
-  
-  // Nếu chuỗi chứa dấu chấm hoặc phẩy động (vd: "47.00", "9.00", "21.00")
   const num = parseFloat(str.replace(',', '.'));
-  
   return isNaN(num) ? 0 : Math.round(num);
 };
 
@@ -39,10 +35,14 @@ export default function Home() {
   const [isSaving, setIsSaving] = useState<boolean>(false);
   const [lastSaved, setLastSaved] = useState<string>("");
 
-  // Lưu lịch sử các sản phẩm vừa kiểm kê trong phiên
   const [recentSavedList, setRecentSavedList] = useState<any[]>([]);
 
-  // State cho ngoài danh mục
+  // State quản lý lịch sử và Tìm kiếm nhanh
+  const [historyList, setHistoryList] = useState<any[]>([]);
+  const [historySearchTerm, setHistorySearchTerm] = useState<string>(""); // State mới để tìm kiếm tức thì
+  const [loadingHistory, setLoadingHistory] = useState<boolean>(false);
+
+  // State ngoài danh mục
   const [outsideBarcode, setOutsideBarcode] = useState<string>("");
   const [outsideName, setOutsideName] = useState<string>("");
   const [outsideUnit, setOutsideUnit] = useState<string>("Cái");
@@ -54,6 +54,9 @@ export default function Home() {
 
   const [isScanningLive, setIsScanningLive] = useState<boolean>(false);
   const searchInputRef = useRef<HTMLInputElement>(null);
+
+  // Phân quyền Admin
+  const isAdmin = userName.toLowerCase() === 'phuong' || userName.toLowerCase() === 'admin';
 
   useEffect(() => {
     const savedName = localStorage.getItem("kiemke_username");
@@ -74,7 +77,6 @@ export default function Home() {
       });
   }, []);
 
-  // Tự động focus vào ô tìm kiếm khi ở bước 2
   useEffect(() => {
     if (step === 2 && searchInputRef.current) {
       searchInputRef.current.focus();
@@ -92,6 +94,19 @@ export default function Home() {
       console.error("Lỗi API Progress:", e);
     }
     setLoadingProgress(false);
+  };
+
+  // Nâng cấp: Tải TOÀN BỘ dữ liệu lịch sử một lần, sau đó dùng Frontend để tìm kiếm tức thì
+  const fetchHistory = async () => {
+    setLoadingHistory(true);
+    try {
+      const res = await fetch(`/api/history?store=${encodeURIComponent(store)}&currentUser=${encodeURIComponent(userName)}`);
+      const result = await res.json();
+      if (result.success) setHistoryList(result.data);
+    } catch (e) {
+      console.error("Lỗi tải lịch sử:", e);
+    }
+    setLoadingHistory(false);
   };
 
   const handleLogin = () => {
@@ -123,7 +138,7 @@ export default function Home() {
       const maVach = String(row[2] || "").toLowerCase();
       const ten = String(row[6]).toLowerCase();
       return ma.includes(qClean) || maVach.includes(qClean) || ten.includes(qClean);
-    }).slice(0, 20); // Tăng hiển thị gợi ý lên 20 item cho màn hình máy tính rộng
+    }).slice(0, 20);
     
     setSearchResults(results);
   };
@@ -154,7 +169,6 @@ export default function Home() {
     setStep(3);
   };
 
-  // Camera Trực Tiếp
   const toggleLiveCamera = async () => {
     if (isScanningLive) {
       setIsScanningLive(false);
@@ -200,7 +214,6 @@ export default function Home() {
     }
   };
 
-  // Lưu sản phẩm chính (Bước 3)
   const handleSave = async () => {
     if (countQty === "") return alert("Vui lòng nhập số lượng kiểm kê thực tế!");
     setIsSaving(true);
@@ -229,7 +242,7 @@ export default function Home() {
       const result = await res.json();
       
       if (result.success) {
-        const savedMsg = `Đã lưu: ${selectedProduct.name} - SL Thực Tế: ${thucTeVal} ${selectedProduct.unit}`;
+        const savedMsg = `Đã lưu: ${selectedProduct.name} - SL: ${thucTeVal} ${selectedProduct.unit}`;
         setLastSaved(savedMsg);
         setRecentSavedList(prev => [{ name: selectedProduct.name, qty: thucTeVal, unit: selectedProduct.unit, time: new Date().toLocaleTimeString() }, ...prev.slice(0, 9)]);
         setStep(2); 
@@ -244,7 +257,6 @@ export default function Home() {
     setIsSaving(false);
   };
 
-  // Lưu sản phẩm ngoài danh mục (Bước 4)
   const handleSaveOutside = async () => {
     if (!outsideBarcode.trim()) return alert("Vui lòng nhập mã vạch / mã hàng!");
     if (!outsideName.trim()) return alert("Vui lòng nhập tên sản phẩm!");
@@ -280,6 +292,54 @@ export default function Home() {
       alert("Lỗi kết nối mạng khi lưu ngoài danh mục!");
     }
     setIsSaving(false);
+  };
+
+  const handleUpdateHistoryQty = async (rowIndex: number, currentQty: number) => {
+    if (!isAdmin) return; 
+    const newQtyStr = prompt("Nhập số lượng thực tế MỚI để lưu lại:", currentQty.toString());
+    if (newQtyStr === null || newQtyStr.trim() === "") return;
+
+    const newQty = parseFloat(newQtyStr);
+    if (isNaN(newQty)) return alert("Số lượng không hợp lệ!");
+
+    try {
+      const res = await fetch('/api/history', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ rowIndex, newQty })
+      });
+      const result = await res.json();
+      if (result.success) {
+        alert("✅ Đã cập nhật số lượng thành công!");
+        fetchHistory(); // Load lại dữ liệu mới
+        loadProgress(store);
+      } else {
+        alert("Lỗi: " + result.error);
+      }
+    } catch (e) {
+      alert("Lỗi kết nối máy chủ!");
+    }
+  };
+
+  const handleDeleteHistoryRow = async (rowIndex: number) => {
+    if (!isAdmin) return; 
+    if (!confirm("⚠️ Chú ý: Bạn đang thực hiện quyền XÓA với tư cách Admin.\nBạn có chắc chắn muốn xóa vĩnh viễn dòng này không?")) return;
+
+    try {
+      const res = await fetch(`/api/history?rowIndex=${rowIndex}`, {
+        method: 'DELETE',
+      });
+      const result = await res.json();
+      if (result.success) {
+        alert("🗑️ Đã xóa dòng thành công!");
+        fetchHistory();
+        loadProgress(store);
+      } else {
+        alert("Lỗi: " + result.error);
+      }
+    } catch (e) {
+      alert("Lỗi kết nối máy chủ!");
+    }
   };
 
   const handleExportReport = async () => {
@@ -324,6 +384,16 @@ export default function Home() {
     setIsExporting(false);
   };
 
+  // Logic lọc dữ liệu trực tiếp trên Frontend (Instant Search)
+  const displayedHistory = historyList.filter(item => {
+    const term = historySearchTerm.toLowerCase();
+    return (
+      item.maHang.toLowerCase().includes(term) ||
+      item.tenHang.toLowerCase().includes(term) ||
+      (item.userName && item.userName.toLowerCase().includes(term))
+    );
+  });
+
   if (loading) {
     return (
       <div className="d-flex justify-content-center align-items-center vh-100 bg-light">
@@ -334,9 +404,8 @@ export default function Home() {
 
   return (
     <div className="container-fluid bg-light min-vh-100 py-4">
-      <div className="container" style={{ maxWidth: '1100px' }}>
+      <div className="container" style={{ maxWidth: '1200px' }}>
         
-        {/* Header hệ thống */}
         {step > 0 && (
           <div className="d-flex justify-content-between align-items-center mb-4 pb-3 border-bottom bg-white p-3 rounded-4 shadow-sm">
             <div>
@@ -344,7 +413,9 @@ export default function Home() {
               <span className="text-muted small">Kho đang làm việc: <strong className="text-success">{store}</strong></span>
             </div>
             <div className="d-flex align-items-center gap-3">
-              <span className="badge bg-secondary fs-6 py-2 px-3">👤 Nhân viên: {userName}</span>
+              <span className={`badge fs-6 py-2 px-3 ${isAdmin ? 'bg-danger' : 'bg-secondary'}`}>
+                {isAdmin ? '👑 Admin' : '👤 Nhân viên'}: {userName}
+              </span>
               <button className="btn btn-outline-danger btn-sm fw-bold px-3" onClick={handleLogout}>Thoát tài khoản</button>
             </div>
           </div>
@@ -360,7 +431,7 @@ export default function Home() {
                 <input 
                   type="text" 
                   className="form-control form-control-lg mb-4" 
-                  placeholder="Ví dụ: Nguyễn Văn A" 
+                  placeholder="Nhập tên đăng nhập..." 
                   value={userName} 
                   onChange={(e) => setUserName(e.target.value)} 
                   onKeyDown={(e) => e.key === 'Enter' && handleLogin()}
@@ -406,20 +477,21 @@ export default function Home() {
           </div>
         )}
 
-        {/* BƯỚC 2: MÀN HÌNH CHÍNH PC (2 CỘT: TÌM KIẾM + TIẾN ĐỘ & LỊCH SỬ) */}
+        {/* BƯỚC 2: MÀN HÌNH CHÍNH PC */}
         {step === 2 && (
           <div className="row g-4">
-            {/* CỘT TRÁI: TÌM KIẾM VÀ NHẬP LIỆU NHANH */}
             <div className="col-lg-7">
               <div className="card p-4 shadow border-0 rounded-4 bg-white h-100">
                 <div className="d-flex justify-content-between align-items-center mb-3">
                   <h5 className="text-primary fw-bold m-0">🔍 Tìm kiếm & Quét sản phẩm</h5>
-                  <button className="btn btn-sm btn-outline-secondary" onClick={() => setStep(1)}>Đổi kho khác</button>
+                  <div>
+                    <button className="btn btn-sm btn-outline-info me-2 fw-bold" onClick={() => { setStep(5); fetchHistory(); setHistorySearchTerm(""); }}>📋 Lịch sử nhập</button>
+                    <button className="btn btn-sm btn-outline-secondary" onClick={() => setStep(1)}>Đổi kho</button>
+                  </div>
                 </div>
 
                 {lastSaved && <div className="alert alert-success py-2 small fw-bold shadow-sm mb-3">🔔 {lastSaved}</div>}
 
-                {/* Ô nhập tìm kiếm bàn phím nhanh */}
                 <div className="mb-3">
                   <label className="form-label fw-bold text-dark">Nhập mã hàng, mã vạch hoặc tên sản phẩm:</label>
                   <input 
@@ -433,7 +505,6 @@ export default function Home() {
                   />
                 </div>
 
-                {/* Danh sách gợi ý tìm kiếm rộng rãi */}
                 {searchResults.length > 0 && (
                   <div className="mb-3 position-relative">
                     <ul className="list-group shadow border rounded-3" style={{ maxHeight: '350px', overflowY: 'auto' }}>
@@ -487,7 +558,6 @@ export default function Home() {
               </div>
             </div>
 
-            {/* CỘT PHẢI: TIẾN ĐỘ VÀ LỊCH SỬ KIỂM KÊ GẦN NHẤT */}
             <div className="col-lg-5">
               <div className="card p-4 shadow border-0 rounded-4 bg-white mb-4">
                 <h5 className="text-success fw-bold mb-3">📊 Tiến độ kiểm kê kho</h5>
@@ -514,7 +584,7 @@ export default function Home() {
                     </div>
                     
                     <button 
-                      className="btn btn-outline-primary w-100 fw-bold py-2" 
+                      className="btn btn-outline-primary w-100 fw-bold py-2 mb-2" 
                       onClick={handleExportReport}
                       disabled={isExporting}
                     >
@@ -526,7 +596,6 @@ export default function Home() {
                 )}
               </div>
 
-              {/* BẢNG LỊCH SỬ VỪA LƯU TRONG PHIÊN */}
               <div className="card p-4 shadow border-0 rounded-4 bg-white">
                 <h6 className="text-secondary fw-bold mb-3">🕒 Sản phẩm vừa lưu gần đây</h6>
                 {recentSavedList.length === 0 ? (
@@ -549,7 +618,7 @@ export default function Home() {
           </div>
         )}
 
-        {/* BƯỚC 3: NHẬP SỐ LƯỢNG VÀ LƯU (SẢN PHẨM TRONG DANH MỤC) */}
+        {/* BƯỚC 3: NHẬP SỐ LƯỢNG VÀ LƯU */}
         {step === 3 && selectedProduct && (
           <div className="row justify-content-center">
             <div className="col-md-7">
@@ -585,19 +654,8 @@ export default function Home() {
                 </div>
                 
                 <div className="d-flex gap-3">
-                  <button 
-                    className="btn btn-outline-secondary btn-lg flex-grow-1 fw-bold" 
-                    onClick={() => setStep(2)} 
-                    disabled={isSaving}
-                  >
-                    Hủy (Quay lại)
-                  </button>
-                  
-                  <button 
-                    className="btn btn-success btn-lg flex-grow-2 fw-bold shadow-sm" 
-                    onClick={handleSave} 
-                    disabled={isSaving}
-                  >
+                  <button className="btn btn-outline-secondary btn-lg flex-grow-1 fw-bold" onClick={() => setStep(2)} disabled={isSaving}>Hủy</button>
+                  <button className="btn btn-success btn-lg flex-grow-2 fw-bold shadow-sm" onClick={handleSave} disabled={isSaving}>
                     {isSaving ? "⏳ ĐANG LƯU..." : "💾 LƯU VÀO KHO (Enter)"}
                   </button>
                 </div>
@@ -606,7 +664,7 @@ export default function Home() {
           </div>
         )}
 
-        {/* BƯỚC 4: FORM NHẬP SẢN PHẨM NGOÀI DANH MỤC */}
+        {/* BƯỚC 4: FORM NGOÀI DANH MỤC */}
         {step === 4 && (
           <div className="row justify-content-center">
             <div className="col-md-7">
@@ -615,65 +673,26 @@ export default function Home() {
 
                 <div className="mb-3">
                   <label className="form-label fw-bold">Mã vạch / Mã hàng:</label>
-                  <input 
-                    type="text" 
-                    className="form-control form-control-lg bg-light" 
-                    placeholder="Nhập hoặc quét mã..." 
-                    value={outsideBarcode} 
-                    onChange={(e) => setOutsideBarcode(e.target.value)}
-                    autoFocus
-                  />
+                  <input type="text" className="form-control form-control-lg bg-light" value={outsideBarcode} onChange={(e) => setOutsideBarcode(e.target.value)} autoFocus />
                 </div>
-
                 <div className="mb-3">
                   <label className="form-label fw-bold">Tên sản phẩm:</label>
-                  <input 
-                    type="text" 
-                    className="form-control form-control-lg bg-light" 
-                    placeholder="Nhập đầy đủ tên sản phẩm..." 
-                    value={outsideName} 
-                    onChange={(e) => setOutsideName(e.target.value)}
-                  />
+                  <input type="text" className="form-control form-control-lg bg-light" value={outsideName} onChange={(e) => setOutsideName(e.target.value)} />
                 </div>
-
                 <div className="row mb-3">
                   <div className="col-md-6">
-                    <label className="form-label fw-bold">Đơn vị tính (ĐVT):</label>
-                    <input 
-                      type="text" 
-                      className="form-control form-control-lg bg-light" 
-                      placeholder="Hộp, Cái, Lọ, Bao..." 
-                      value={outsideUnit} 
-                      onChange={(e) => setOutsideUnit(e.target.value)}
-                    />
+                    <label className="form-label fw-bold">Đơn vị tính:</label>
+                    <input type="text" className="form-control form-control-lg bg-light" value={outsideUnit} onChange={(e) => setOutsideUnit(e.target.value)} />
                   </div>
                   <div className="col-md-6">
                     <label className="form-label fw-bold">📦 Số lượng thực tế:</label>
-                    <input 
-                      type="number" 
-                      className="form-control form-control-lg bg-light border-primary" 
-                      placeholder="0" 
-                      value={outsideQty} 
-                      onChange={(e) => setOutsideQty(e.target.value)}
-                      onKeyDown={(e) => e.key === 'Enter' && handleSaveOutside()}
-                    />
+                    <input type="number" className="form-control form-control-lg bg-light border-primary" value={outsideQty} onChange={(e) => setOutsideQty(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleSaveOutside()} />
                   </div>
                 </div>
                 
                 <div className="d-flex gap-3 mt-4">
-                  <button 
-                    className="btn btn-outline-secondary btn-lg flex-grow-1 fw-bold" 
-                    onClick={() => setStep(2)} 
-                    disabled={isSaving}
-                  >
-                    Hủy (Quay lại)
-                  </button>
-
-                  <button 
-                    className="btn btn-warning btn-lg flex-grow-2 fw-bold shadow-sm text-dark" 
-                    onClick={handleSaveOutside} 
-                    disabled={isSaving}
-                  >
+                  <button className="btn btn-outline-secondary btn-lg flex-grow-1 fw-bold" onClick={() => setStep(2)} disabled={isSaving}>Hủy</button>
+                  <button className="btn btn-warning btn-lg flex-grow-2 fw-bold text-dark shadow-sm" onClick={handleSaveOutside} disabled={isSaving}>
                     {isSaving ? "⏳ ĐANG LƯU..." : "💾 LƯU VÀO SHEET NGOÀI (Enter)"}
                   </button>
                 </div>
@@ -681,6 +700,116 @@ export default function Home() {
             </div>
           </div>
         )}
+
+        {/* BƯỚC 5: QUẢN LÝ LỊCH SỬ NHẬP (CÓ BẢO MẬT ADMIN & TÌM KIẾM NHANH) */}
+        {step === 5 && (
+          <div className="card p-0 shadow border-0 rounded-4 bg-white overflow-hidden">
+            <div className="d-flex justify-content-between align-items-center p-4 border-bottom bg-light">
+              <h4 className="text-primary fw-bold m-0">📋 Quản Lý Lịch Sử Kiểm Kê</h4>
+              <button className="btn btn-secondary fw-bold shadow-sm" onClick={() => setStep(2)}>⬅ Quay lại trang chủ</button>
+            </div>
+
+            <div className="p-4">
+              {/* THANH TÌM KIẾM ĐA NĂNG & TỨC THÌ */}
+              <div className="row mb-4">
+                <div className="col-12">
+                  <label className="form-label fw-bold text-dark">
+                    🔍 Tìm kiếm nhanh (Theo Mã, Tên, hoặc Tên nhân viên):
+                  </label>
+                  <input 
+                    type="text" 
+                    className="form-control form-control-lg border-primary shadow-sm" 
+                    placeholder="Gõ từ khóa để lọc bảng ngay lập tức..." 
+                    value={historySearchTerm} 
+                    onChange={(e) => setHistorySearchTerm(e.target.value)}
+                    autoFocus
+                  />
+                  {!isAdmin && (
+                    <div className="form-text text-info fw-bold mt-2">
+                      📌 Chế độ nhân viên: Bạn chỉ xem và tìm kiếm được các mã hàng do bạn ({userName}) nhập tại kho {store}.
+                    </div>
+                  )}
+                  {isAdmin && (
+                    <div className="form-text text-danger fw-bold mt-2">
+                      👑 Chế độ Admin: Đang hiển thị toàn bộ lịch sử của tất cả các kho trên hệ thống.
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {loadingHistory ? (
+                <div className="text-center py-5">
+                  <div className="spinner-border text-primary" role="status"></div>
+                  <div className="mt-2 text-muted fw-bold">Đang tải dữ liệu lịch sử...</div>
+                </div>
+              ) : displayedHistory.length === 0 ? (
+                <div className="text-center py-5 text-muted fw-bold bg-light rounded-3 border">
+                  {historySearchTerm ? "Không tìm thấy dữ liệu nào khớp với từ khóa của bạn." : "Chưa có dữ liệu lịch sử nào."}
+                </div>
+              ) : (
+                <div className="table-responsive border rounded-3" style={{ maxHeight: '600px', overflowY: 'auto' }}>
+                  <table className="table table-hover table-bordered align-middle m-0">
+                    <thead className="table-dark sticky-top">
+                      <tr>
+                        <th style={{ width: '10%' }}>Thời gian</th>
+                        <th style={{ width: '8%' }}>Kho</th>
+                        <th style={{ width: '10%' }}>Người nhập</th>
+                        <th style={{ width: '12%' }}>Mã hàng</th>
+                        <th>Tên sản phẩm</th>
+                        <th className="text-center" style={{ width: '8%' }}>Hệ thống</th>
+                        <th className="text-center" style={{ width: '8%' }}>Thực tế</th>
+                        <th className="text-center" style={{ width: '9%' }}>Chênh lệch</th>
+                        {/* CHỈ HIỆN CỘT THAO TÁC NẾU LÀ ADMIN */}
+                        {isAdmin && <th className="text-center" style={{ width: '15%' }}>Thao tác</th>}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {displayedHistory.map((item, idx) => (
+                        <tr key={idx}>
+                          <td><small className="text-muted">{item.time}</small></td>
+                          <td><small className="text-secondary fw-bold">{item.store.replace('Kho Địa điểm kinh doanh ', 'Cửa hàng ')}</small></td>
+                          <td>
+                            {/* Hiển thị cả tên người dùng hoặc ĐVT để đề phòng Google Sheets sắp xếp cột sai */}
+                            <span className="badge bg-secondary px-2 py-1">{item.userName || "N/A"}</span>
+                          </td>
+                          <td><strong className="text-primary">{item.maHang}</strong></td>
+                          <td><span className="fw-medium">{item.tenHang}</span></td>
+                          <td className="text-center bg-light">{item.slHeThong}</td>
+                          <td className="text-center fw-bold text-success fs-5">{item.slThucTe}</td>
+                          <td className={`text-center fw-bold fs-6 ${item.chenhLech < 0 ? 'text-danger' : item.chenhLech > 0 ? 'text-primary' : 'text-muted'}`}>
+                            {item.chenhLech}
+                          </td>
+                          {/* CHỈ HIỆN NÚT SỬA XÓA NẾU LÀ ADMIN */}
+                          {isAdmin && (
+                            <td className="text-center">
+                              <div className="d-flex justify-content-center gap-2">
+                                <button 
+                                  className="btn btn-sm btn-warning fw-bold text-dark d-flex align-items-center gap-1 shadow-sm" 
+                                  onClick={() => handleUpdateHistoryQty(item.rowIndex, item.slThucTe)}
+                                  title="Chỉnh sửa số lượng"
+                                >
+                                  ✏️ Sửa
+                                </button>
+                                <button 
+                                  className="btn btn-sm btn-danger fw-bold d-flex align-items-center gap-1 shadow-sm" 
+                                  onClick={() => handleDeleteHistoryRow(item.rowIndex)}
+                                  title="Xóa dòng kiểm kê này"
+                                >
+                                  🗑️ Xóa
+                                </button>
+                              </div>
+                            </td>
+                          )}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
       </div>
     </div>
   );
