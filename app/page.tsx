@@ -37,10 +37,15 @@ export default function Home() {
 
   const [recentSavedList, setRecentSavedList] = useState<any[]>([]);
 
-  // State quản lý lịch sử và Tìm kiếm nhanh
+  // State quản lý lịch sử
   const [historyList, setHistoryList] = useState<any[]>([]);
-  const [historySearchTerm, setHistorySearchTerm] = useState<string>(""); // State mới để tìm kiếm tức thì
+  const [historySearchTerm, setHistorySearchTerm] = useState<string>(""); 
   const [loadingHistory, setLoadingHistory] = useState<boolean>(false);
+
+  // === State thống kê số lượng đã kiểm & người kiểm ===
+  const [alreadyCounted, setAlreadyCounted] = useState<number>(0);
+  const [countedBy, setCountedBy] = useState<string>(""); 
+  const [loadingCounted, setLoadingCounted] = useState<boolean>(false);
 
   // State ngoài danh mục
   const [outsideBarcode, setOutsideBarcode] = useState<string>("");
@@ -55,7 +60,6 @@ export default function Home() {
   const [isScanningLive, setIsScanningLive] = useState<boolean>(false);
   const searchInputRef = useRef<HTMLInputElement>(null);
 
-  // Phân quyền Admin
   const isAdmin = userName.toLowerCase() === 'phuong' || userName.toLowerCase() === 'admin';
 
   useEffect(() => {
@@ -96,7 +100,6 @@ export default function Home() {
     setLoadingProgress(false);
   };
 
-  // Nâng cấp: Tải TOÀN BỘ dữ liệu lịch sử một lần, sau đó dùng Frontend để tìm kiếm tức thì
   const fetchHistory = async () => {
     setLoadingHistory(true);
     try {
@@ -107,6 +110,24 @@ export default function Home() {
       console.error("Lỗi tải lịch sử:", e);
     }
     setLoadingHistory(false);
+  };
+
+  const checkCounted = async (code: string) => {
+    if (!code) return;
+    setLoadingCounted(true);
+    setAlreadyCounted(0);
+    setCountedBy("");
+    try {
+      const res = await fetch(`/api/counted?store=${encodeURIComponent(store)}&code=${encodeURIComponent(code)}`);
+      const result = await res.json();
+      if (result.success) {
+        setAlreadyCounted(result.totalCounted);
+        setCountedBy(result.countedBy || "");
+      }
+    } catch (e) {
+      console.error("Lỗi đếm số lượng đã kiểm:", e);
+    }
+    setLoadingCounted(false);
   };
 
   const handleLogin = () => {
@@ -132,12 +153,20 @@ export default function Home() {
     }
     
     const qClean = query.toLowerCase().trim();
+    const qCode = qClean.replace(/[^a-z0-9]/g, ''); 
+    
     const results = data.danhMuc.filter((row: any) => {
       if(row.length < 7 || !row[6] || String(row[6]).trim() === "") return false;
-      const ma = String(row[0]).toLowerCase();
-      const maVach = String(row[2] || "").toLowerCase();
+      const ma = String(row[0]).toLowerCase().trim().replace(/[^a-z0-9]/g, '');
       const ten = String(row[6]).toLowerCase();
-      return ma.includes(qClean) || maVach.includes(qClean) || ten.includes(qClean);
+      let maVach = String(row[2] || "").toLowerCase().trim();
+      if (maVach.endsWith('.0')) maVach = maVach.slice(0, -2);
+      const maVachClean = maVach.replace(/[^a-z0-9]/g, '');
+
+      return ma.includes(qCode) || 
+             maVachClean.includes(qCode) || 
+             maVachClean.endsWith(qCode) || 
+             ten.includes(qClean);
     }).slice(0, 20);
     
     setSearchResults(results);
@@ -145,9 +174,10 @@ export default function Home() {
 
   const selectProduct = (item: any) => {
     const maHang = String(item[0]).trim();
-    const maVach = String(item[2] || "").trim();
-    let sysQty = 0;
+    let maVach = String(item[2] || "").trim();
+    if (maVach.endsWith('.0')) maVach = maVach.slice(0, -2);
     
+    let sysQty = 0;
     const tonRow = data.tonKho.find((r: any) => 
       String(r[0]).trim().toLowerCase() === store.trim().toLowerCase() && 
       String(r[1]).trim() === maHang
@@ -167,6 +197,8 @@ export default function Home() {
     setSearchResults([]); 
     setCountQty(""); 
     setStep(3);
+
+    checkCounted(maHang);
   };
 
   const toggleLiveCamera = async () => {
@@ -189,11 +221,16 @@ export default function Home() {
             (decodedText) => {
               scanner.stop().catch(() => {});
               setIsScanningLive(false);
-              const qClean = decodedText.toLowerCase().trim();
-              const found = data.danhMuc.find((row: any) => 
-                String(row[0]).toLowerCase().trim() === qClean || 
-                String(row[2]).toLowerCase().trim() === qClean
-              );
+              
+              const qCode = decodedText.toLowerCase().trim().replace(/[^a-z0-9]/g, '');
+              const found = data.danhMuc.find((row: any) => {
+                let ma = String(row[0]).toLowerCase().trim().replace(/[^a-z0-9]/g, '');
+                let maVach = String(row[2] || "").toLowerCase().trim();
+                if (maVach.endsWith('.0')) maVach = maVach.slice(0, -2);
+                const maVachClean = maVach.replace(/[^a-z0-9]/g, '');
+                return ma === qCode || maVachClean === qCode || maVachClean.endsWith(qCode);
+              });
+
               if (found) {
                 selectProduct(found);
               } else {
@@ -202,6 +239,8 @@ export default function Home() {
                 setOutsideUnit("Cái");
                 setOutsideQty("");
                 setStep(4);
+                
+                checkCounted(decodedText);
               }
             },
             () => {}
@@ -311,7 +350,7 @@ export default function Home() {
       const result = await res.json();
       if (result.success) {
         alert("✅ Đã cập nhật số lượng thành công!");
-        fetchHistory(); // Load lại dữ liệu mới
+        fetchHistory(); 
         loadProgress(store);
       } else {
         alert("Lỗi: " + result.error);
@@ -384,11 +423,18 @@ export default function Home() {
     setIsExporting(false);
   };
 
-  // Logic lọc dữ liệu trực tiếp trên Frontend (Instant Search)
   const displayedHistory = historyList.filter(item => {
-    const term = historySearchTerm.toLowerCase();
+    const term = historySearchTerm.toLowerCase().trim();
+    const termCode = term.replace(/[^a-z0-9]/g, '');
+    
+    let maVach = String(item.maVach || "").toLowerCase().trim();
+    if (maVach.endsWith('.0')) maVach = maVach.slice(0, -2);
+    const maVachClean = maVach.replace(/[^a-z0-9]/g, '');
+    
     return (
-      item.maHang.toLowerCase().includes(term) ||
+      item.maHang.toLowerCase().includes(termCode) ||
+      maVachClean.includes(termCode) ||
+      maVachClean.endsWith(termCode) ||
       item.tenHang.toLowerCase().includes(term) ||
       (item.userName && item.userName.toLowerCase().includes(term))
     );
@@ -498,7 +544,7 @@ export default function Home() {
                     ref={searchInputRef}
                     type="text" 
                     className="form-control form-control-lg bg-light border-primary" 
-                    placeholder="Gõ từ khóa để tìm nhanh sản phẩm..." 
+                    placeholder="Gõ mã hoặc 6 số cuối mã vạch..." 
                     value={searchQuery} 
                     onChange={handleSearch} 
                     autoComplete="off"
@@ -508,22 +554,26 @@ export default function Home() {
                 {searchResults.length > 0 && (
                   <div className="mb-3 position-relative">
                     <ul className="list-group shadow border rounded-3" style={{ maxHeight: '350px', overflowY: 'auto' }}>
-                      {searchResults.map((item: any, idx: number) => (
-                        <li 
-                          key={idx} 
-                          className="list-group-item list-group-item-action py-3 px-3 d-flex justify-content-between align-items-center" 
-                          style={{ cursor: 'pointer' }} 
-                          onClick={() => selectProduct(item)}
-                        >
-                          <div>
-                            <strong className="text-primary fs-6">{item[6]}</strong><br/>
-                            <small className="text-muted">
-                              Mã hàng: <strong>{item[0]}</strong> | Mã vạch: <strong>{item[2] || "N/A"}</strong>
-                            </small>
-                          </div>
-                          <span className="badge bg-info text-dark fs-6">ĐVT: {item[8] || "-"}</span>
-                        </li>
-                      ))}
+                      {searchResults.map((item: any, idx: number) => {
+                        let mv = String(item[2] || "");
+                        if (mv.endsWith('.0')) mv = mv.slice(0, -2); 
+                        return (
+                          <li 
+                            key={idx} 
+                            className="list-group-item list-group-item-action py-3 px-3 d-flex justify-content-between align-items-center" 
+                            style={{ cursor: 'pointer' }} 
+                            onClick={() => selectProduct(item)}
+                          >
+                            <div>
+                              <strong className="text-primary fs-6">{item[6]}</strong><br/>
+                              <small className="text-muted">
+                                Mã hàng: <strong>{item[0]}</strong> | Mã vạch: <strong>{mv || "N/A"}</strong>
+                              </small>
+                            </div>
+                            <span className="badge bg-info text-dark fs-6">ĐVT: {item[8] || "-"}</span>
+                          </li>
+                        )
+                      })}
                     </ul>
                   </div>
                 )}
@@ -621,23 +671,44 @@ export default function Home() {
         {/* BƯỚC 3: NHẬP SỐ LƯỢNG VÀ LƯU */}
         {step === 3 && selectedProduct && (
           <div className="row justify-content-center">
-            <div className="col-md-7">
+            <div className="col-md-8">
               <div className="card p-5 shadow border-0 rounded-4 bg-white">
                 <h4 className="text-primary fw-bold mb-3 border-bottom pb-2">Xác nhận số lượng thực tế</h4>
                 
                 <div className="row mb-3">
-                  <div className="col-sm-6">
+                  <div className="col-sm-7">
                     <p className="mb-1"><strong>Mã hàng:</strong> {selectedProduct.maHang}</p>
                     <p className="mb-1"><strong>Mã vạch:</strong> <span className="text-success fw-bold">{selectedProduct.barcode || "N/A"}</span></p>
-                  </div>
-                  <div className="col-sm-6">
                     <p className="mb-1"><strong>Đơn vị tính:</strong> <span className="text-info fw-bold">{selectedProduct.unit}</span></p>
-                    <p className="mb-1"><strong>Tồn hệ thống:</strong> <span className="text-danger fw-bold fs-5">{selectedProduct.sysQty}</span></p>
+                  </div>
+                  
+                  {/* CỘT THỐNG KÊ KÈM TÊN NGƯỜI ĐÃ KIỂM */}
+                  <div className="col-sm-5">
+                    <div className="p-3 bg-light border border-info rounded-3 h-100 d-flex flex-column justify-content-center shadow-sm">
+                      <div className="d-flex justify-content-between align-items-center mb-2">
+                        <span className="text-muted fw-bold small">TỒN HỆ THỐNG:</span>
+                        <span className="text-danger fw-bold fs-5">{selectedProduct.sysQty}</span>
+                      </div>
+                      <div className="d-flex justify-content-between align-items-center border-top pt-2 mt-1">
+                        <span className="text-secondary fw-bold small">MÃ NÀY ĐÃ KIỂM:</span>
+                        {loadingCounted ? (
+                          <span className="spinner-border spinner-border-sm text-primary" role="status"></span>
+                        ) : (
+                          <span className="text-primary fw-bold fs-4">{alreadyCounted}</span>
+                        )}
+                      </div>
+                      {/* Bổ sung hiển thị tên người đã đếm */}
+                      {alreadyCounted > 0 && countedBy && (
+                        <div className="text-end mt-1">
+                          <span className="badge bg-warning text-dark small shadow-sm">Bởi: {countedBy}</span>
+                        </div>
+                      )}
+                    </div>
                   </div>
                 </div>
 
                 <div className="mb-4 bg-light p-3 rounded-3 border">
-                  <h5 className="text-dark fw-bold mb-2">{selectedProduct.name}</h5>
+                  <h5 className="text-dark fw-bold mb-0">{selectedProduct.name}</h5>
                 </div>
 
                 <div className="mb-4">
@@ -673,8 +744,35 @@ export default function Home() {
 
                 <div className="mb-3">
                   <label className="form-label fw-bold">Mã vạch / Mã hàng:</label>
-                  <input type="text" className="form-control form-control-lg bg-light" value={outsideBarcode} onChange={(e) => setOutsideBarcode(e.target.value)} autoFocus />
+                  <input 
+                    type="text" 
+                    className="form-control form-control-lg bg-light" 
+                    value={outsideBarcode} 
+                    onChange={(e) => setOutsideBarcode(e.target.value)} 
+                    onBlur={(e) => checkCounted(e.target.value)}
+                    autoFocus 
+                  />
                 </div>
+                
+                {outsideBarcode && (
+                  <div className="mb-3 p-3 bg-light border border-info rounded-3 shadow-sm">
+                    <div className="d-flex justify-content-between align-items-center">
+                      <span className="text-secondary fw-bold small">SỐ LƯỢNG MÃ NÀY ĐÃ KIỂM:</span>
+                      {loadingCounted ? (
+                        <span className="spinner-border spinner-border-sm text-primary" role="status"></span>
+                      ) : (
+                        <span className="text-primary fw-bold fs-4">{alreadyCounted}</span>
+                      )}
+                    </div>
+                    {/* Bổ sung hiển thị tên người đã đếm */}
+                    {alreadyCounted > 0 && countedBy && (
+                      <div className="d-flex justify-content-end mt-1">
+                        <span className="badge bg-warning text-dark small shadow-sm">Bởi: {countedBy}</span>
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 <div className="mb-3">
                   <label className="form-label fw-bold">Tên sản phẩm:</label>
                   <input type="text" className="form-control form-control-lg bg-light" value={outsideName} onChange={(e) => setOutsideName(e.target.value)} />
@@ -701,7 +799,7 @@ export default function Home() {
           </div>
         )}
 
-        {/* BƯỚC 5: QUẢN LÝ LỊCH SỬ NHẬP (CÓ BẢO MẬT ADMIN & TÌM KIẾM NHANH) */}
+        {/* BƯỚC 5: QUẢN LÝ LỊCH SỬ NHẬP */}
         {step === 5 && (
           <div className="card p-0 shadow border-0 rounded-4 bg-white overflow-hidden">
             <div className="d-flex justify-content-between align-items-center p-4 border-bottom bg-light">
@@ -710,11 +808,10 @@ export default function Home() {
             </div>
 
             <div className="p-4">
-              {/* THANH TÌM KIẾM ĐA NĂNG & TỨC THÌ */}
               <div className="row mb-4">
                 <div className="col-12">
                   <label className="form-label fw-bold text-dark">
-                    🔍 Tìm kiếm nhanh (Theo Mã, Tên, hoặc Tên nhân viên):
+                    🔍 Tìm kiếm nhanh (Mã hàng, 6 số cuối Mã vạch, Tên SP, hoặc Người nhập):
                   </label>
                   <input 
                     type="text" 
@@ -759,39 +856,39 @@ export default function Home() {
                         <th className="text-center" style={{ width: '8%' }}>Hệ thống</th>
                         <th className="text-center" style={{ width: '8%' }}>Thực tế</th>
                         <th className="text-center" style={{ width: '9%' }}>Chênh lệch</th>
-                        {/* CHỈ HIỆN CỘT THAO TÁC NẾU LÀ ADMIN */}
-                        {isAdmin && <th className="text-center" style={{ width: '15%' }}>Thao tác</th>}
+                        {isAdmin && <th className="text-center" style={{ width: '14%' }}>Thao tác</th>}
                       </tr>
                     </thead>
                     <tbody>
                       {displayedHistory.map((item, idx) => (
                         <tr key={idx}>
                           <td><small className="text-muted">{item.time}</small></td>
-                          <td><small className="text-secondary fw-bold">{item.store.replace('Kho Địa điểm kinh doanh ', 'Cửa hàng ')}</small></td>
+                          <td><small className="text-secondary fw-bold">{item.store.replace('Kho Địa điểm kinh doanh ', 'CH ')}</small></td>
                           <td>
-                            {/* Hiển thị cả tên người dùng hoặc ĐVT để đề phòng Google Sheets sắp xếp cột sai */}
                             <span className="badge bg-secondary px-2 py-1">{item.userName || "N/A"}</span>
                           </td>
-                          <td><strong className="text-primary">{item.maHang}</strong></td>
+                          <td>
+                            <strong className="text-primary">{item.maHang}</strong><br/>
+                            <small className="text-muted">{item.maVach}</small>
+                          </td>
                           <td><span className="fw-medium">{item.tenHang}</span></td>
                           <td className="text-center bg-light">{item.slHeThong}</td>
                           <td className="text-center fw-bold text-success fs-5">{item.slThucTe}</td>
                           <td className={`text-center fw-bold fs-6 ${item.chenhLech < 0 ? 'text-danger' : item.chenhLech > 0 ? 'text-primary' : 'text-muted'}`}>
                             {item.chenhLech}
                           </td>
-                          {/* CHỈ HIỆN NÚT SỬA XÓA NẾU LÀ ADMIN */}
                           {isAdmin && (
                             <td className="text-center">
                               <div className="d-flex justify-content-center gap-2">
                                 <button 
-                                  className="btn btn-sm btn-warning fw-bold text-dark d-flex align-items-center gap-1 shadow-sm" 
+                                  className="btn btn-sm btn-warning fw-bold text-dark shadow-sm px-3" 
                                   onClick={() => handleUpdateHistoryQty(item.rowIndex, item.slThucTe)}
                                   title="Chỉnh sửa số lượng"
                                 >
                                   ✏️ Sửa
                                 </button>
                                 <button 
-                                  className="btn btn-sm btn-danger fw-bold d-flex align-items-center gap-1 shadow-sm" 
+                                  className="btn btn-sm btn-danger fw-bold shadow-sm px-3" 
                                   onClick={() => handleDeleteHistoryRow(item.rowIndex)}
                                   title="Xóa dòng kiểm kê này"
                                 >
