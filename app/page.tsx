@@ -630,6 +630,28 @@ export default function Home() {
 
   return (
     <div className="container-fluid bg-light min-vh-100 py-4">
+      {/* LỚP PHỦ TOÀN MÀN HÌNH KHI QUÉT MÃ - camera lớn, dễ bắt mã như máy quét siêu thị, luôn có nút thoát để quay lại nhập tay */}
+      {isScanningLive && (
+        <div 
+          className="position-fixed top-0 start-0 w-100 h-100 d-flex flex-column"
+          style={{ zIndex: 2000, backgroundColor: '#000' }}
+        >
+          <div 
+            className="position-absolute top-0 start-0 w-100 d-flex justify-content-between align-items-center p-3"
+            style={{ zIndex: 2002, background: 'linear-gradient(180deg, rgba(0,0,0,0.75), transparent)' }}
+          >
+            <span className="text-white fw-bold small">📷 Đưa mã vạch vào giữa khung hình</span>
+            <button 
+              className="btn btn-danger fw-bold shadow-sm px-3" 
+              onClick={stopScanner}
+            >
+              ✕ Đóng & Nhập tay
+            </button>
+          </div>
+          <div id="reader-container" className="flex-grow-1 w-100"></div>
+        </div>
+      )}
+
       <div className="container" style={{ maxWidth: '1200px' }}>
         
         {step > 0 && (
@@ -789,12 +811,6 @@ export default function Home() {
                     ➕ Thêm Ngoài Danh Mục
                   </button>
                 </div>
-
-                <div 
-                  id="reader-container" 
-                  className="w-100 mt-3 rounded-3 overflow-hidden shadow-sm" 
-                  style={{ display: isScanningLive ? 'block' : 'none', minHeight: '280px', backgroundColor: '#000' }}
-                ></div>
               </div>
             </div>
 
