@@ -307,7 +307,10 @@ export default function Home() {
         if (!scannerRef.current) {
           scannerRef.current = new Html5Qrcode("reader-container", {
             verbose: false,
-            // Chỉ nhận diện các định dạng mã vạch bán lẻ phổ biến -> giải mã nhanh & chính xác hơn như máy quét siêu thị
+            // Ép dùng bộ giải mã zxing-js cho mọi trình duyệt thay vì BarcodeDetector gốc của Android
+            // (BarcodeDetector gốc kết hợp formatsToSupport tùy chỉnh gây quét không ra / quét sai mã trên nhiều máy Android)
+            useBarCodeDetectorIfSupported: false,
+            // Chỉ nhận diện định dạng mã vạch bán lẻ có checksum (không gồm ITF vì dễ đọc nhầm số do không có ký tự kiểm tra)
             formatsToSupport: [
               Html5QrcodeSupportedFormats.EAN_13,
               Html5QrcodeSupportedFormats.EAN_8,
@@ -315,7 +318,6 @@ export default function Home() {
               Html5QrcodeSupportedFormats.UPC_E,
               Html5QrcodeSupportedFormats.CODE_128,
               Html5QrcodeSupportedFormats.CODE_39,
-              Html5QrcodeSupportedFormats.ITF,
               Html5QrcodeSupportedFormats.QR_CODE,
             ],
           });
@@ -326,12 +328,12 @@ export default function Home() {
           { facingMode: "environment" },
           {
             fps: 15,
-            // qrbox tính theo % khung hình thay vì px cố định -> không lỗi vỡ layout trên màn hình iPhone nhỏ
+            // qrbox tính theo % khung hình, có giới hạn tối thiểu để tránh khung quét quá nhỏ/méo khi layout chưa ổn định
             qrbox: (viewfinderWidth: number, viewfinderHeight: number) => {
-              const size = Math.floor(Math.min(viewfinderWidth, viewfinderHeight) * 0.75);
-              return { width: size, height: Math.floor(size * 0.55) };
+              const minSide = Math.min(viewfinderWidth, viewfinderHeight);
+              const size = Math.max(220, Math.floor(minSide * 0.75));
+              return { width: size, height: Math.floor(size * 0.5) };
             },
-            aspectRatio: 1.777778,
             disableFlip: false,
           },
           (decodedText: string) => {
