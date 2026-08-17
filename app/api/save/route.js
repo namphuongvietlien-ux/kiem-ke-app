@@ -5,7 +5,7 @@ export async function POST(request) {
   try {
     // 1. Nhận dữ liệu từ giao diện gửi lên
     const body = await request.json();
-    const { store, barcode, name, sysQty, countQty, maVach, unit, diff, userName } = body;
+    const { store, location, barcode, name, sysQty, countQty, maVach, unit, diff, userName } = body;
     
     // 2. Tạo thời gian theo đúng chuẩn M/D/YYYY H:mm:ss (Giờ Việt Nam)
     const dateObj = new Date(new Date().toLocaleString("en-US", {timeZone: "Asia/Ho_Chi_Minh"}));
@@ -19,11 +19,11 @@ export async function POST(request) {
     const timestamp = `${month}/${day}/${year} ${hours}:${minutes}:${seconds}`;
 
     // 3. Cấu trúc dòng dữ liệu sẽ lưu vào Sheet (11 Cột)
-    // [Thời gian, Kho, Địa chỉ, Mã hàng, Tên SP, Tồn hệ thống, Thực tế, Lệch, Mã vạch, ĐVT, Người kiểm]
+    // [Thời gian, Kho, Vị trí lưu kho, Mã hàng, Tên SP, Tồn hệ thống, Thực tế, Lệch, Mã vạch, ĐVT, Người kiểm]
     const rowData = [
       timestamp, 
       store, 
-      store, 
+      location || store, 
       barcode, 
       name, 
       sysQty, 

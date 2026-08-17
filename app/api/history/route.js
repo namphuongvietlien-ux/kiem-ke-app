@@ -42,7 +42,7 @@ export async function GET(request) {
       rowIndex: index + 2,
       time: row[0] || "",
       store: row[1] || "",
-      address: row[2] || "",
+      location: row[2] || "",
       maHang: row[3] || "",
       tenHang: row[4] || "",
       slHeThong: row[5] || 0,

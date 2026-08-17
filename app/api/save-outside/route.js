@@ -4,7 +4,7 @@ import { getGoogleSheets } from '@/lib/google';
 export async function POST(request) {
   try {
     const body = await request.json();
-    const { store, barcode, name, countQty, unit, userName } = body;
+    const { store, location, barcode, name, countQty, unit, userName } = body;
 
     const sheets = await getGoogleSheets();
     
@@ -31,7 +31,7 @@ export async function POST(request) {
     const rowData = [
       now,
       store,
-      "", 
+      location || "", 
       barcode,
       name,
       countQty,

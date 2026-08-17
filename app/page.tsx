@@ -32,7 +32,9 @@ export default function Home() {
   
   const [selectedProduct, setSelectedProduct] = useState<any>(null);
   const [countQty, setCountQty] = useState<string>("");
+  const [location, setLocation] = useState<string>("");
   const [isSaving, setIsSaving] = useState<boolean>(false);
+  const [fromOrderApp, setFromOrderApp] = useState<boolean>(false);
   const [lastSaved, setLastSaved] = useState<string>("");
 
   const [recentSavedList, setRecentSavedList] = useState<any[]>([]);
@@ -59,16 +61,29 @@ export default function Home() {
 
   const [isScanningLive, setIsScanningLive] = useState<boolean>(false);
   const searchInputRef = useRef<HTMLInputElement>(null);
+  const scannerRef = useRef<any>(null);
+  const scanLockRef = useRef<boolean>(false);
 
   const isAdmin = userName.toLowerCase() === 'phuong' || userName.toLowerCase() === 'admin';
 
   useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const paramUser = params.get('user')?.trim() || "";
+    const paramStore = params.get('store')?.trim() || "";
+    const fromOrder = params.get('from') === 'donhang';
+    if (fromOrder || paramUser || paramStore) setFromOrderApp(true);
+
     const savedName = localStorage.getItem("kiemke_username");
-    if (savedName) {
-      setUserName(savedName);
-      setStep(1); 
+    const initialUser = paramUser || savedName || "";
+    if (initialUser) {
+      setUserName(initialUser);
+      localStorage.setItem("kiemke_username", initialUser);
+      setStep(1);
     }
-    
+    if (paramStore) {
+      setStore(paramStore);
+    }
+
     fetch('/api/data')
       .then(res => res.json())
       .then(res => {
@@ -82,10 +97,35 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
+    if (loading || !data.danhMuc.length) return;
+    const params = new URLSearchParams(window.location.search);
+    const paramUser = params.get('user')?.trim() || "";
+    const paramStore = params.get('store')?.trim() || "";
+    if (paramStore && paramUser) {
+      setStep(2);
+      loadProgress(paramStore);
+    }
+  }, [loading, data.danhMuc.length]);
+
+  useEffect(() => {
     if (step === 2 && searchInputRef.current) {
       searchInputRef.current.focus();
     }
   }, [step]);
+
+  // Đảm bảo camera luôn được giải phóng khi rời trang / đổi bước (bắt buộc trên iOS Safari)
+  useEffect(() => {
+    return () => {
+      const scanner = scannerRef.current;
+      if (scanner) {
+        try {
+          if (scanner.getState && scanner.getState() !== 1 /* NOT_STARTED */) {
+            scanner.stop().catch(() => {});
+          }
+        } catch (e) {}
+      }
+    };
+  }, []);
 
   const loadProgress = async (storeName: string) => {
     setLoadingProgress(true);
@@ -201,67 +241,140 @@ export default function Home() {
     checkCounted(maHang);
   };
 
+  // Phát tiếng "bíp" ngắn giống máy quét mã vạch siêu thị (Web Audio API, chạy tốt trên iOS/Android)
+  const playBeep = () => {
+    try {
+      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+      const ctx = new AudioCtx();
+      const oscillator = ctx.createOscillator();
+      const gain = ctx.createGain();
+      oscillator.type = 'sine';
+      oscillator.frequency.value = 1800;
+      gain.gain.value = 0.25;
+      oscillator.connect(gain);
+      gain.connect(ctx.destination);
+      oscillator.start();
+      oscillator.stop(ctx.currentTime + 0.1);
+      oscillator.onended = () => ctx.close();
+    } catch (e) {}
+  };
+
+  const stopScanner = async () => {
+    const scanner = scannerRef.current;
+    if (scanner) {
+      try {
+        const state = scanner.getState();
+        if (state === 2 /* SCANNING */ || state === 3 /* PAUSED */) {
+          await scanner.stop();
+        }
+      } catch (e) {}
+    }
+    setIsScanningLive(false);
+  };
+
   const toggleLiveCamera = async () => {
     if (isScanningLive) {
-      setIsScanningLive(false);
-      try {
-        const { Html5Qrcode } = await import('html5-qrcode');
-        const scanner = new Html5Qrcode("reader-container");
-        await scanner.stop();
-      } catch (e) {}
-    } else {
-      setIsScanningLive(true);
-      setTimeout(async () => {
-        try {
-          const { Html5Qrcode } = await import('html5-qrcode');
-          const scanner = new Html5Qrcode("reader-container");
-          await scanner.start(
-            { facingMode: "environment" },
-            { fps: 10, qrbox: { width: 250, height: 150 } },
-            (decodedText) => {
-              scanner.stop().catch(() => {});
-              setIsScanningLive(false);
-              
-              const qCode = decodedText.toLowerCase().trim().replace(/[^a-z0-9]/g, '');
-              const found = data.danhMuc.find((row: any) => {
-                let ma = String(row[0]).toLowerCase().trim().replace(/[^a-z0-9]/g, '');
-                let maVach = String(row[2] || "").toLowerCase().trim();
-                if (maVach.endsWith('.0')) maVach = maVach.slice(0, -2);
-                const maVachClean = maVach.replace(/[^a-z0-9]/g, '');
-                return ma === qCode || maVachClean === qCode || maVachClean.endsWith(qCode);
-              });
-
-              if (found) {
-                selectProduct(found);
-              } else {
-                setOutsideBarcode(decodedText);
-                setOutsideName("");
-                setOutsideUnit("Cái");
-                setOutsideQty("");
-                setStep(4);
-                
-                checkCounted(decodedText);
-              }
-            },
-            () => {}
-          );
-        } catch (err) {
-          alert("❌ Không thể mở camera. Vui lòng cấp quyền camera trong trình duyệt!");
-          setIsScanningLive(false);
-        }
-      }, 300);
+      await stopScanner();
+      return;
     }
+
+    setIsScanningLive(true);
+    scanLockRef.current = false;
+
+    setTimeout(async () => {
+      try {
+        const { Html5Qrcode, Html5QrcodeSupportedFormats } = await import('html5-qrcode');
+
+        // Dùng lại đúng 1 instance để tránh rò rỉ luồng camera (nguyên nhân Safari/iOS từ chối cấp quyền camera sau vài lần bật/tắt)
+        if (!scannerRef.current) {
+          scannerRef.current = new Html5Qrcode("reader-container", {
+            verbose: false,
+            // Chỉ nhận diện các định dạng mã vạch bán lẻ phổ biến -> giải mã nhanh & chính xác hơn như máy quét siêu thị
+            formatsToSupport: [
+              Html5QrcodeSupportedFormats.EAN_13,
+              Html5QrcodeSupportedFormats.EAN_8,
+              Html5QrcodeSupportedFormats.UPC_A,
+              Html5QrcodeSupportedFormats.UPC_E,
+              Html5QrcodeSupportedFormats.CODE_128,
+              Html5QrcodeSupportedFormats.CODE_39,
+              Html5QrcodeSupportedFormats.ITF,
+              Html5QrcodeSupportedFormats.QR_CODE,
+            ],
+          });
+        }
+        const scanner = scannerRef.current;
+
+        await scanner.start(
+          { facingMode: "environment" },
+          {
+            fps: 15,
+            // qrbox tính theo % khung hình thay vì px cố định -> không lỗi vỡ layout trên màn hình iPhone nhỏ
+            qrbox: (viewfinderWidth: number, viewfinderHeight: number) => {
+              const size = Math.floor(Math.min(viewfinderWidth, viewfinderHeight) * 0.75);
+              return { width: size, height: Math.floor(size * 0.55) };
+            },
+            aspectRatio: 1.777778,
+            disableFlip: false,
+          },
+          (decodedText: string) => {
+            // Chặn xử lý trùng lặp khi camera bắt được nhiều khung hình liên tiếp cùng 1 mã
+            if (scanLockRef.current) return;
+            scanLockRef.current = true;
+
+            if (navigator.vibrate) navigator.vibrate(120);
+            playBeep();
+            try { scanner.pause(true); } catch (e) {}
+
+            const qCode = decodedText.toLowerCase().trim().replace(/[^a-z0-9]/g, '');
+            const found = data.danhMuc.find((row: any) => {
+              let ma = String(row[0]).toLowerCase().trim().replace(/[^a-z0-9]/g, '');
+              let maVach = String(row[2] || "").toLowerCase().trim();
+              if (maVach.endsWith('.0')) maVach = maVach.slice(0, -2);
+              const maVachClean = maVach.replace(/[^a-z0-9]/g, '');
+              return ma === qCode || maVachClean === qCode || maVachClean.endsWith(qCode);
+            });
+
+            stopScanner();
+
+            if (found) {
+              selectProduct(found);
+            } else {
+              setOutsideBarcode(decodedText);
+              setOutsideName("");
+              setOutsideUnit("Cái");
+              setOutsideQty("");
+              setStep(4);
+              checkCounted(decodedText);
+            }
+          },
+          () => {} // Bỏ qua lỗi giải mã từng khung hình (bình thường khi đang canh mã)
+        );
+      } catch (err: any) {
+        setIsScanningLive(false);
+        if (err?.name === 'NotAllowedError') {
+          alert("❌ Bạn chưa cấp quyền Camera cho trang này. Vui lòng vào Cài đặt trình duyệt để cấp quyền!");
+        } else if (err?.name === 'NotFoundError') {
+          alert("❌ Không tìm thấy Camera trên thiết bị!");
+        } else {
+          alert("❌ Không thể mở camera. Vui lòng đảm bảo trang đang chạy qua HTTPS và thử lại!");
+        }
+      }
+    }, 300);
   };
+
 
   const handleSave = async () => {
     if (countQty === "") return alert("Vui lòng nhập số lượng kiểm kê thực tế!");
+    if (!location.trim()) return alert("Vui lòng nhập vị trí lưu kho (kệ/dãy/tầng)!");
     setIsSaving(true);
     
     const thucTeVal = parseFloat(countQty);
     const diff = thucTeVal - selectedProduct.sysQty;
+    const locationTrimmed = location.trim();
     
     const payload = {
       store, 
+      location: locationTrimmed,
       barcode: selectedProduct.maHang, 
       name: selectedProduct.name,
       sysQty: selectedProduct.sysQty, 
@@ -281,7 +394,8 @@ export default function Home() {
       const result = await res.json();
       
       if (result.success) {
-        const savedMsg = `Đã lưu: ${selectedProduct.name} - SL: ${thucTeVal} ${selectedProduct.unit}`;
+        localStorage.setItem(`kiemke_location_${store}`, locationTrimmed);
+        const savedMsg = `Đã lưu: ${selectedProduct.name} - SL: ${thucTeVal} ${selectedProduct.unit} (Vị trí: ${locationTrimmed})`;
         setLastSaved(savedMsg);
         setRecentSavedList(prev => [{ name: selectedProduct.name, qty: thucTeVal, unit: selectedProduct.unit, time: new Date().toLocaleTimeString() }, ...prev.slice(0, 9)]);
         setStep(2); 
@@ -300,10 +414,13 @@ export default function Home() {
     if (!outsideBarcode.trim()) return alert("Vui lòng nhập mã vạch / mã hàng!");
     if (!outsideName.trim()) return alert("Vui lòng nhập tên sản phẩm!");
     if (outsideQty === "") return alert("Vui lòng nhập số lượng thực tế!");
+    if (!location.trim()) return alert("Vui lòng nhập vị trí lưu kho (kệ/dãy/tầng)!");
 
     setIsSaving(true);
+    const locationTrimmed = location.trim();
     const payload = {
       store,
+      location: locationTrimmed,
       barcode: outsideBarcode.trim(),
       name: outsideName.trim(),
       countQty: parseFloat(outsideQty) || 0,
@@ -319,7 +436,8 @@ export default function Home() {
       });
       const result = await res.json();
       if (result.success) {
-        const savedMsg = `Đã lưu ngoài DM: ${outsideName} - SL: ${outsideQty}`;
+        localStorage.setItem(`kiemke_location_${store}`, locationTrimmed);
+        const savedMsg = `Đã lưu ngoài DM: ${outsideName} - SL: ${outsideQty} (Vị trí: ${locationTrimmed})`;
         setLastSaved(savedMsg);
         setRecentSavedList(prev => [{ name: outsideName, qty: outsideQty, unit: outsideUnit, time: new Date().toLocaleTimeString() }, ...prev.slice(0, 9)]);
         setStep(2);
@@ -467,6 +585,12 @@ export default function Home() {
           </div>
         )}
 
+        {fromOrderApp && (
+          <div className="alert alert-info border-0 shadow-sm mb-4 fw-bold">
+            🔗 Đã mở từ app đơn hàng · Người dùng: <span className="text-primary">{userName || '...'}</span> · Kho: <span className="text-success">{store || '...'}</span>
+          </div>
+        )}
+
         {/* BƯỚC 0: ĐĂNG NHẬP */}
         {step === 0 && (
           <div className="row justify-content-center mt-5">
@@ -513,6 +637,7 @@ export default function Home() {
                     else { 
                       setStep(2); 
                       loadProgress(store); 
+                      setLocation(localStorage.getItem(`kiemke_location_${store}`) || "");
                     } 
                   }}
                 >
@@ -723,6 +848,18 @@ export default function Home() {
                     autoFocus 
                   />
                 </div>
+
+                <div className="mb-4">
+                  <label className="form-label fw-bold text-dark">📍 Vị trí lưu kho (kệ/dãy/tầng):</label>
+                  <input 
+                    type="text" 
+                    className="form-control form-control-lg bg-light border-primary" 
+                    placeholder="VD: Kệ A1 - Tầng 2" 
+                    value={location} 
+                    onChange={(e) => setLocation(e.target.value)} 
+                    onKeyDown={(e) => e.key === 'Enter' && handleSave()}
+                  />
+                </div>
                 
                 <div className="d-flex gap-3">
                   <button className="btn btn-outline-secondary btn-lg flex-grow-1 fw-bold" onClick={() => setStep(2)} disabled={isSaving}>Hủy</button>
@@ -787,6 +924,18 @@ export default function Home() {
                     <input type="number" className="form-control form-control-lg bg-light border-primary" value={outsideQty} onChange={(e) => setOutsideQty(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleSaveOutside()} />
                   </div>
                 </div>
+
+                <div className="mb-3">
+                  <label className="form-label fw-bold">📍 Vị trí lưu kho (kệ/dãy/tầng):</label>
+                  <input 
+                    type="text" 
+                    className="form-control form-control-lg bg-light border-primary" 
+                    placeholder="VD: Kệ A1 - Tầng 2" 
+                    value={location} 
+                    onChange={(e) => setLocation(e.target.value)} 
+                    onKeyDown={(e) => e.key === 'Enter' && handleSaveOutside()}
+                  />
+                </div>
                 
                 <div className="d-flex gap-3 mt-4">
                   <button className="btn btn-outline-secondary btn-lg flex-grow-1 fw-bold" onClick={() => setStep(2)} disabled={isSaving}>Hủy</button>
@@ -850,6 +999,7 @@ export default function Home() {
                       <tr>
                         <th style={{ width: '10%' }}>Thời gian</th>
                         <th style={{ width: '8%' }}>Kho</th>
+                        <th style={{ width: '10%' }}>Vị trí</th>
                         <th style={{ width: '10%' }}>Người nhập</th>
                         <th style={{ width: '12%' }}>Mã hàng</th>
                         <th>Tên sản phẩm</th>
@@ -864,6 +1014,7 @@ export default function Home() {
                         <tr key={idx}>
                           <td><small className="text-muted">{item.time}</small></td>
                           <td><small className="text-secondary fw-bold">{item.store.replace('Kho Địa điểm kinh doanh ', 'CH ')}</small></td>
+                          <td><small className="text-dark">{item.location || "-"}</small></td>
                           <td>
                             <span className="badge bg-secondary px-2 py-1">{item.userName || "N/A"}</span>
                           </td>

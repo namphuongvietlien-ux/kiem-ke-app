@@ -1,4 +1,4 @@
-import { getGoogleSheets } from '@/lib/google';
+import { getGoogleSheets } from '../../../lib/google';
 import { NextResponse } from 'next/server';
 
 // Khởi tạo Biến lưu trữ tạm trên RAM (Cache)
