@@ -327,21 +327,6 @@ export default function Home() {
     scanLockRef.current = false;
     const scanSession = ++scanSessionRef.current;
 
-    // Chờ khung camera thực sự có kích thước trên màn hình rồi mới khởi động quét
-    // (một số máy Android như Oppo/ColorOS render layout chậm hơn, đo kích thước quá sớm khiến camera không mở được)
-    const waitForContainerSize = (elementId: string, maxWaitMs = 3000): Promise<boolean> => {
-      const startTime = Date.now();
-      return new Promise((resolve) => {
-        const check = () => {
-          const el = document.getElementById(elementId);
-          if (el && el.clientWidth > 0 && el.clientHeight > 0) return resolve(true);
-          if (Date.now() - startTime > maxWaitMs) return resolve(false);
-          requestAnimationFrame(check);
-        };
-        check();
-      });
-    };
-
     // iOS Safari chặn autoplay nếu video.play() bị gọi quá xa thao tác chạm của người dùng -> video bị đứng, hiện nút Play
     // nên chủ động play() lại ngay khi camera đã khởi động, thay vì để lệ thuộc hoàn toàn vào thư viện
     const forcePlayVideo = () => {
@@ -351,14 +336,11 @@ export default function Home() {
       }
     };
 
-    // Chạy ngay ở khung hình kế tiếp (thay vì chờ 300ms) để giữ nguyên "user gesture" của thao tác chạm, tránh bị iOS chặn autoplay
-    requestAnimationFrame(async () => {
+    // Chờ overlay mount ổn định như bản đã hoạt động tốt trên mobile trước đây.
+    setTimeout(async () => {
       try {
         if (scanSession !== scanSessionRef.current) return;
         const { Html5Qrcode, Html5QrcodeSupportedFormats } = await import('html5-qrcode');
-
-        const containerReady = await waitForContainerSize("reader-container");
-        if (!containerReady || scanSession !== scanSessionRef.current) return;
 
         // Dùng lại đúng 1 instance để tránh rò rỉ luồng camera (nguyên nhân Safari/iOS từ chối cấp quyền camera sau vài lần bật/tắt)
         if (!scannerRef.current) {
@@ -428,7 +410,7 @@ export default function Home() {
 
         const startCamera = async () => {
           try {
-            await scanner.start({ facingMode: { ideal: "environment" }, ...videoConstraints }, scanConfig, onScanSuccess, () => {});
+            await scanner.start({ facingMode: "environment", ...videoConstraints }, scanConfig, onScanSuccess, () => {});
             return;
           } catch (preferredError) {
             const cameras = await Html5Qrcode.getCameras();
@@ -483,7 +465,7 @@ export default function Home() {
         if (scanSession !== scanSessionRef.current) return;
         setScanError("Không mở được camera trên thiết bị này. Bạn có thể nhập mã bằng tay.");
       }
-    });
+    }, 300);
   };
 
 
