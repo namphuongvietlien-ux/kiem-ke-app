@@ -24,3 +24,40 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+@media (max-width: 767.98px) {
+  body {
+    overflow-x: hidden;
+  }
+
+  .container-fluid {
+    padding: 0.5rem !important;
+  }
+
+  .container-fluid > .container {
+    padding-left: 0.25rem;
+    padding-right: 0.25rem;
+  }
+
+  .container-fluid .card {
+    border-radius: 0.75rem !important;
+  }
+
+  .container-fluid .card.p-4,
+  .container-fluid .card.p-5 {
+    padding: 0.9rem !important;
+  }
+
+  .container-fluid h3,
+  .container-fluid h4,
+  .container-fluid h5 {
+    line-height: 1.2;
+  }
+
+  #reader-container video {
+    width: 100% !important;
+    height: auto !important;
+    max-height: 100dvh;
+    object-fit: contain;
+  }
+}

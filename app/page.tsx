@@ -60,6 +60,7 @@ export default function Home() {
   const [isExporting, setIsExporting] = useState<boolean>(false);
 
   const [isScanningLive, setIsScanningLive] = useState<boolean>(false);
+  const [scanError, setScanError] = useState<string>("");
   const [locationOptions, setLocationOptions] = useState<string[]>([]);
   const [isNewLocation, setIsNewLocation] = useState<boolean>(false);
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -322,18 +323,19 @@ export default function Home() {
     }
 
     setIsScanningLive(true);
+    setScanError("");
     scanLockRef.current = false;
     const scanSession = ++scanSessionRef.current;
 
     // Chờ khung camera thực sự có kích thước trên màn hình rồi mới khởi động quét
     // (một số máy Android như Oppo/ColorOS render layout chậm hơn, đo kích thước quá sớm khiến camera không mở được)
-    const waitForContainerSize = (elementId: string, maxWaitMs = 1500): Promise<void> => {
+    const waitForContainerSize = (elementId: string, maxWaitMs = 3000): Promise<boolean> => {
       const startTime = Date.now();
       return new Promise((resolve) => {
         const check = () => {
           const el = document.getElementById(elementId);
-          if (el && el.clientWidth > 0 && el.clientHeight > 0) return resolve();
-          if (Date.now() - startTime > maxWaitMs) return resolve();
+          if (el && el.clientWidth > 0 && el.clientHeight > 0) return resolve(true);
+          if (Date.now() - startTime > maxWaitMs) return resolve(false);
           requestAnimationFrame(check);
         };
         check();
@@ -355,6 +357,9 @@ export default function Home() {
         if (scanSession !== scanSessionRef.current) return;
         const { Html5Qrcode, Html5QrcodeSupportedFormats } = await import('html5-qrcode');
 
+        const containerReady = await waitForContainerSize("reader-container");
+        if (!containerReady || scanSession !== scanSessionRef.current) return;
+
         // Dùng lại đúng 1 instance để tránh rò rỉ luồng camera (nguyên nhân Safari/iOS từ chối cấp quyền camera sau vài lần bật/tắt)
         if (!scannerRef.current) {
           scannerRef.current = new Html5Qrcode("reader-container", {
@@ -375,8 +380,6 @@ export default function Home() {
           });
         }
         const scanner = scannerRef.current;
-
-        await waitForContainerSize("reader-container");
         if (scanSession !== scanSessionRef.current) return;
 
         // Mở camera bằng constraint tối giản trước; nâng độ phân giải sau khi stream đã chạy để tránh lỗi Oppo/iOS.
@@ -478,11 +481,7 @@ export default function Home() {
         setTimeout(forcePlayVideo, 500);
       } catch {
         if (scanSession !== scanSessionRef.current) return;
-        setIsScanningLive(false);
-        // Trình duyệt vẫn có thể hỏi quyền lần đầu; nếu bị từ chối/không có camera thì quay thẳng về nhập tay.
-        setStep(2);
-        setSearchQuery("");
-        setTimeout(() => searchInputRef.current?.focus(), 0);
+        setScanError("Không mở được camera trên thiết bị này. Bạn có thể nhập mã bằng tay.");
       }
     });
   };
@@ -755,6 +754,17 @@ export default function Home() {
               ✕ Đóng & Nhập tay
             </button>
           </div>
+          {scanError && (
+            <div className="position-absolute top-50 start-50 translate-middle text-center text-white px-4" style={{ zIndex: 2002, width: 'min(92vw, 420px)' }}>
+              <div className="alert alert-warning fw-bold mb-3">{scanError}</div>
+              <button
+                className="btn btn-light btn-lg fw-bold"
+                onClick={() => { stopScanner(); setStep(2); setScanError(""); setTimeout(() => searchInputRef.current?.focus(), 0); }}
+              >
+                Nhập mã bằng tay
+              </button>
+            </div>
+          )}
           <div 
             id="reader-container" 
             className="flex-grow-1 w-100"
@@ -770,7 +780,7 @@ export default function Home() {
       <div className="container" style={{ maxWidth: '1200px' }}>
         
         {step > 0 && (
-          <div className="d-flex justify-content-between align-items-center mb-4 pb-3 border-bottom bg-white p-3 rounded-4 shadow-sm">
+          <div className="d-none d-md-flex justify-content-between align-items-center mb-4 pb-3 border-bottom bg-white p-3 rounded-4 shadow-sm">
             <div>
               <h3 className="text-primary fw-bold m-0">🖥️ HỆ THỐNG KIỂM KÊ KHO (PC VERSION)</h3>
               <span className="text-muted small">Kho đang làm việc: <strong className="text-success">{store}</strong></span>
@@ -785,7 +795,7 @@ export default function Home() {
         )}
 
         {fromOrderApp && (
-          <div className="alert alert-info border-0 shadow-sm mb-4 fw-bold">
+          <div className="d-none d-md-block alert alert-info border-0 shadow-sm mb-4 fw-bold">
             🔗 Đã mở từ app đơn hàng · Người dùng: <span className="text-primary">{userName || '...'}</span> · Kho: <span className="text-success">{store || '...'}</span>
           </div>
         )}
