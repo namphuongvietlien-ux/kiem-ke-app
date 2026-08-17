@@ -441,14 +441,10 @@ export default function Home() {
         setTimeout(forcePlayVideo, 500);
       } catch (err: any) {
         setIsScanningLive(false);
-        if (err?.name === 'NotAllowedError') {
-          alert("❌ Bạn chưa cấp quyền Camera cho trang này. Vui lòng vào Cài đặt trình duyệt để cấp quyền!");
-        } else if (err?.name === 'NotFoundError') {
-          alert("❌ Không tìm thấy Camera trên thiết bị!");
-        } else {
-          const errorName = err?.name ? ` (${err.name})` : "";
-          alert(`❌ Không thể mở camera${errorName}. Hãy cấp quyền Camera cho Safari/Chrome và thử tải lại trang.`);
-        }
+        // Trình duyệt vẫn có thể hỏi quyền lần đầu; nếu bị từ chối/không có camera thì quay thẳng về nhập tay.
+        setStep(2);
+        setSearchQuery("");
+        setTimeout(() => searchInputRef.current?.focus(), 0);
       }
     });
   };
