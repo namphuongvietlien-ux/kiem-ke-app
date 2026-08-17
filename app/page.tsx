@@ -13,10 +13,16 @@ const STORES: string[] = [
 
 const parseQty = (val: any): number => {
   if (val === "" || val === null || val === undefined) return 0;
-  if (typeof val === 'number') return Math.round(val);
-  let str = val.toString().trim();
-  const num = parseFloat(str.replace(',', '.'));
-  return isNaN(num) ? 0 : Math.round(num);
+  if (typeof val === 'number') return val;
+  const str = val.toString().trim().replace(/\s/g, '');
+  if (!str) return 0;
+
+  // Google Sheet returns values such as "2,797"; do not parse this as 2.797.
+  const normalized = str.includes(',') && /,\d{3}(?:$|\.)/.test(str)
+    ? str.replace(/,/g, '')
+    : str.replace(',', '.');
+  const num = parseFloat(normalized);
+  return isNaN(num) ? 0 : num;
 };
 
 export default function Home() {
