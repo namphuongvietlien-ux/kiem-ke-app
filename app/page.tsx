@@ -351,8 +351,9 @@ export default function Home() {
 
         await waitForContainerSize("reader-container");
 
-        // Yêu cầu độ phân giải "ideal" để máy mạnh lấy hình nét hơn nhưng không ép thiết bị yếu.
-        const videoConstraints = {
+        // Mở camera bằng constraint tối giản trước; nâng độ phân giải sau khi stream đã chạy để tránh lỗi Oppo/iOS.
+        const videoConstraints = {};
+        const qualityConstraints = {
           width: { ideal: 1920 },
           height: { ideal: 1080 },
         };
@@ -403,7 +404,7 @@ export default function Home() {
 
         const startCamera = async () => {
           try {
-            await scanner.start({ facingMode: "environment", ...videoConstraints }, scanConfig, onScanSuccess, () => {});
+            await scanner.start({ facingMode: { ideal: "environment" }, ...videoConstraints }, scanConfig, onScanSuccess, () => {});
             return;
           } catch (preferredError) {
             const cameras = await Html5Qrcode.getCameras();
@@ -421,6 +422,10 @@ export default function Home() {
         };
 
         await startCamera();
+
+        try {
+          await scanner.applyVideoConstraints(qualityConstraints);
+        } catch (qualityError) {}
 
         // Autofocus là best-effort: chỉ áp dụng sau khi camera đã chạy để không làm hỏng getUserMedia trên iOS/ColorOS.
         try {
@@ -441,7 +446,8 @@ export default function Home() {
         } else if (err?.name === 'NotFoundError') {
           alert("❌ Không tìm thấy Camera trên thiết bị!");
         } else {
-          alert("❌ Không thể mở camera. Vui lòng đảm bảo trang đang chạy qua HTTPS và thử lại!");
+          const errorName = err?.name ? ` (${err.name})` : "";
+          alert(`❌ Không thể mở camera${errorName}. Hãy cấp quyền Camera cho Safari/Chrome và thử tải lại trang.`);
         }
       }
     });
