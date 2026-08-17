@@ -351,13 +351,22 @@ export default function Home() {
 
         await waitForContainerSize("reader-container");
 
+        // Yêu cầu độ phân giải "ideal" (không phải "min"/"exact") -> máy mạnh lấy Full HD cho mã nhỏ nét căng,
+        // máy yếu tự hạ xuống mà không bị crash/đen màn hình. focusMode continuous chỉ Android hỗ trợ, iOS sẽ tự bỏ qua.
+        const videoConstraints = {
+          width: { ideal: 1920 },
+          height: { ideal: 1080 },
+          advanced: [{ focusMode: "continuous" }],
+        };
+
         const scanConfig = {
-          fps: 15,
-          // qrbox tính theo % khung hình, có giới hạn tối thiểu để tránh khung quét quá nhỏ/méo khi layout chưa ổn định
+          fps: 18,
+          // Khung quét hình chữ nhật dẹt (rộng, thấp) khớp với mã vạch 1D (EAN/UPC/CODE128) thay vì khung vuông
+          // -> loại bớt nhiễu chữ phía trên/dưới mã, đồng thời vẫn tính theo % màn hình để không vỡ layout máy nhỏ
           qrbox: (viewfinderWidth: number, viewfinderHeight: number) => {
-            const minSide = Math.min(viewfinderWidth, viewfinderHeight);
-            const size = Math.max(Math.min(220, minSide || 220), Math.floor(minSide * 0.75));
-            return { width: size, height: Math.floor(size * 0.5) };
+            const width = Math.max(220, Math.min(Math.floor(viewfinderWidth * 0.85), 500));
+            const height = Math.max(90, Math.floor(width * 0.35));
+            return { width, height: Math.min(height, viewfinderHeight) };
           },
           disableFlip: false,
         };
@@ -395,13 +404,13 @@ export default function Home() {
         };
 
         try {
-          await scanner.start({ facingMode: "environment" }, scanConfig, onScanSuccess, () => {});
+          await scanner.start({ facingMode: "environment", ...videoConstraints }, scanConfig, onScanSuccess, () => {});
         } catch (facingModeErr) {
           // Một số máy Android (Oppo/Realme/Vivo...) xử lý facingMode không ổn định -> dò camera sau (rear) theo deviceId thay thế
           const cameras = await Html5Qrcode.getCameras();
           if (!cameras || cameras.length === 0) throw facingModeErr;
           const rearCamera = cameras.find((c: any) => /back|rear|environment/i.test(c.label)) || cameras[cameras.length - 1];
-          await scanner.start({ deviceId: { exact: rearCamera.id } }, scanConfig, onScanSuccess, () => {});
+          await scanner.start({ deviceId: { exact: rearCamera.id }, ...videoConstraints }, scanConfig, onScanSuccess, () => {});
         }
 
         forcePlayVideo();
