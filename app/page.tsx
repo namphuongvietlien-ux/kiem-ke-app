@@ -314,7 +314,17 @@ export default function Home() {
       });
     };
 
-    setTimeout(async () => {
+    // iOS Safari chặn autoplay nếu video.play() bị gọi quá xa thao tác chạm của người dùng -> video bị đứng, hiện nút Play
+    // nên chủ động play() lại ngay khi camera đã khởi động, thay vì để lệ thuộc hoàn toàn vào thư viện
+    const forcePlayVideo = () => {
+      const videoEl = document.querySelector('#reader-container video') as HTMLVideoElement | null;
+      if (videoEl && videoEl.paused) {
+        videoEl.play().catch(() => {});
+      }
+    };
+
+    // Chạy ngay ở khung hình kế tiếp (thay vì chờ 300ms) để giữ nguyên "user gesture" của thao tác chạm, tránh bị iOS chặn autoplay
+    requestAnimationFrame(async () => {
       try {
         const { Html5Qrcode, Html5QrcodeSupportedFormats } = await import('html5-qrcode');
 
@@ -393,6 +403,11 @@ export default function Home() {
           const rearCamera = cameras.find((c: any) => /back|rear|environment/i.test(c.label)) || cameras[cameras.length - 1];
           await scanner.start({ deviceId: { exact: rearCamera.id } }, scanConfig, onScanSuccess, () => {});
         }
+
+        forcePlayVideo();
+        // Thử lại play() thêm vài nhịp phòng khi frame đầu chưa kịp gắn thẻ <video> vào DOM
+        setTimeout(forcePlayVideo, 150);
+        setTimeout(forcePlayVideo, 500);
       } catch (err: any) {
         setIsScanningLive(false);
         if (err?.name === 'NotAllowedError') {
@@ -403,7 +418,7 @@ export default function Home() {
           alert("❌ Không thể mở camera. Vui lòng đảm bảo trang đang chạy qua HTTPS và thử lại!");
         }
       }
-    }, 300);
+    });
   };
 
 
@@ -674,7 +689,15 @@ export default function Home() {
               ✕ Đóng & Nhập tay
             </button>
           </div>
-          <div id="reader-container" className="flex-grow-1 w-100"></div>
+          <div 
+            id="reader-container" 
+            className="flex-grow-1 w-100"
+            onClick={() => {
+              // Lưới an toàn: nếu iOS chặn autoplay và video đang đứng hình (hiện nút Play của trình duyệt), chạm vào là chạy tiếp ngay
+              const videoEl = document.querySelector('#reader-container video') as HTMLVideoElement | null;
+              if (videoEl && videoEl.paused) videoEl.play().catch(() => {});
+            }}
+          ></div>
         </div>
       )}
 
