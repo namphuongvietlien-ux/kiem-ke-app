@@ -351,12 +351,10 @@ export default function Home() {
 
         await waitForContainerSize("reader-container");
 
-        // Yêu cầu độ phân giải "ideal" (không phải "min"/"exact") -> máy mạnh lấy Full HD cho mã nhỏ nét căng,
-        // máy yếu tự hạ xuống mà không bị crash/đen màn hình. focusMode continuous chỉ Android hỗ trợ, iOS sẽ tự bỏ qua.
+        // Yêu cầu độ phân giải "ideal" để máy mạnh lấy hình nét hơn nhưng không ép thiết bị yếu.
         const videoConstraints = {
           width: { ideal: 1920 },
           height: { ideal: 1080 },
-          advanced: [{ focusMode: "continuous" }],
         };
 
         const scanConfig = {
@@ -403,15 +401,34 @@ export default function Home() {
           }
         };
 
+        const startCamera = async () => {
+          try {
+            await scanner.start({ facingMode: "environment", ...videoConstraints }, scanConfig, onScanSuccess, () => {});
+            return;
+          } catch (preferredError) {
+            const cameras = await Html5Qrcode.getCameras();
+            if (!cameras || cameras.length === 0) throw preferredError;
+            const rearCamera = cameras.find((c: any) => /back|rear|environment/i.test(c.label)) || cameras[cameras.length - 1];
+
+            try {
+              await scanner.start({ deviceId: { exact: rearCamera.id }, ...videoConstraints }, scanConfig, onScanSuccess, () => {});
+              return;
+            } catch (deviceError) {
+              // Cuối cùng bỏ độ phân giải lý tưởng; một số Oppo/ColorOS chỉ chấp nhận constraint camera tối giản.
+              await scanner.start({ deviceId: { exact: rearCamera.id } }, scanConfig, onScanSuccess, () => {});
+            }
+          }
+        };
+
+        await startCamera();
+
+        // Autofocus là best-effort: chỉ áp dụng sau khi camera đã chạy để không làm hỏng getUserMedia trên iOS/ColorOS.
         try {
-          await scanner.start({ facingMode: "environment", ...videoConstraints }, scanConfig, onScanSuccess, () => {});
-        } catch (facingModeErr) {
-          // Một số máy Android (Oppo/Realme/Vivo...) xử lý facingMode không ổn định -> dò camera sau (rear) theo deviceId thay thế
-          const cameras = await Html5Qrcode.getCameras();
-          if (!cameras || cameras.length === 0) throw facingModeErr;
-          const rearCamera = cameras.find((c: any) => /back|rear|environment/i.test(c.label)) || cameras[cameras.length - 1];
-          await scanner.start({ deviceId: { exact: rearCamera.id }, ...videoConstraints }, scanConfig, onScanSuccess, () => {});
-        }
+          const capabilities = scanner.getRunningTrackCapabilities();
+          if (capabilities && 'focusMode' in capabilities) {
+            await scanner.applyVideoConstraints({ advanced: [{ focusMode: "continuous" }] });
+          }
+        } catch (focusError) {}
 
         forcePlayVideo();
         // Thử lại play() thêm vài nhịp phòng khi frame đầu chưa kịp gắn thẻ <video> vào DOM
