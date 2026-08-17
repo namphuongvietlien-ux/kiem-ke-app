@@ -60,9 +60,27 @@ export default function Home() {
   const [isExporting, setIsExporting] = useState<boolean>(false);
 
   const [isScanningLive, setIsScanningLive] = useState<boolean>(false);
+  const [locationOptions, setLocationOptions] = useState<string[]>([]);
+  const [isNewLocation, setIsNewLocation] = useState<boolean>(false);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const scannerRef = useRef<any>(null);
   const scanLockRef = useRef<boolean>(false);
+
+  // Chỉ vài kho lớn cần theo dõi vị trí cụ thể -> lưu danh sách vị trí đã dùng theo từng kho để chọn nhanh lại
+  const loadLocationOptions = (storeName: string): string[] => {
+    try {
+      const raw = localStorage.getItem(`kiemke_locations_${storeName}`);
+      return raw ? JSON.parse(raw) : [];
+    } catch (e) { return []; }
+  };
+
+  const saveLocationOption = (storeName: string, loc: string) => {
+    const trimmed = loc.trim();
+    if (!trimmed) return;
+    const updated = [trimmed, ...loadLocationOptions(storeName).filter(l => l !== trimmed)].slice(0, 8);
+    localStorage.setItem(`kiemke_locations_${storeName}`, JSON.stringify(updated));
+    setLocationOptions(updated);
+  };
 
   const isAdmin = userName.toLowerCase() === 'phuong' || userName.toLowerCase() === 'admin';
 
@@ -365,7 +383,6 @@ export default function Home() {
 
   const handleSave = async () => {
     if (countQty === "") return alert("Vui lòng nhập số lượng kiểm kê thực tế!");
-    if (!location.trim()) return alert("Vui lòng nhập vị trí lưu kho (kệ/dãy/tầng)!");
     setIsSaving(true);
     
     const thucTeVal = parseFloat(countQty);
@@ -394,8 +411,8 @@ export default function Home() {
       const result = await res.json();
       
       if (result.success) {
-        localStorage.setItem(`kiemke_location_${store}`, locationTrimmed);
-        const savedMsg = `Đã lưu: ${selectedProduct.name} - SL: ${thucTeVal} ${selectedProduct.unit} (Vị trí: ${locationTrimmed})`;
+        saveLocationOption(store, locationTrimmed);
+        const savedMsg = `Đã lưu: ${selectedProduct.name} - SL: ${thucTeVal} ${selectedProduct.unit}${locationTrimmed ? ` (Vị trí: ${locationTrimmed})` : ''}`;
         setLastSaved(savedMsg);
         setRecentSavedList(prev => [{ name: selectedProduct.name, qty: thucTeVal, unit: selectedProduct.unit, time: new Date().toLocaleTimeString() }, ...prev.slice(0, 9)]);
         setStep(2); 
@@ -414,7 +431,6 @@ export default function Home() {
     if (!outsideBarcode.trim()) return alert("Vui lòng nhập mã vạch / mã hàng!");
     if (!outsideName.trim()) return alert("Vui lòng nhập tên sản phẩm!");
     if (outsideQty === "") return alert("Vui lòng nhập số lượng thực tế!");
-    if (!location.trim()) return alert("Vui lòng nhập vị trí lưu kho (kệ/dãy/tầng)!");
 
     setIsSaving(true);
     const locationTrimmed = location.trim();
@@ -436,8 +452,8 @@ export default function Home() {
       });
       const result = await res.json();
       if (result.success) {
-        localStorage.setItem(`kiemke_location_${store}`, locationTrimmed);
-        const savedMsg = `Đã lưu ngoài DM: ${outsideName} - SL: ${outsideQty} (Vị trí: ${locationTrimmed})`;
+        saveLocationOption(store, locationTrimmed);
+        const savedMsg = `Đã lưu ngoài DM: ${outsideName} - SL: ${outsideQty}${locationTrimmed ? ` (Vị trí: ${locationTrimmed})` : ''}`;
         setLastSaved(savedMsg);
         setRecentSavedList(prev => [{ name: outsideName, qty: outsideQty, unit: outsideUnit, time: new Date().toLocaleTimeString() }, ...prev.slice(0, 9)]);
         setStep(2);
@@ -450,6 +466,52 @@ export default function Home() {
     }
     setIsSaving(false);
   };
+
+  // Chọn nhanh vị trí đã lưu trước đó cho kho hiện tại, hoặc gõ vị trí mới nếu chưa có / cần đổi
+  const renderLocationField = (onEnterSave: () => void) => (
+    <div className="mb-4">
+      <label className="form-label fw-bold text-dark">📍 Vị trí lưu kho (kệ/dãy/tầng) - không bắt buộc:</label>
+      {!isNewLocation && locationOptions.length > 0 ? (
+        <div className="d-flex gap-2">
+          <select 
+            className="form-select form-select-lg bg-light border-primary"
+            value={location}
+            onChange={(e) => setLocation(e.target.value)}
+          >
+            {locationOptions.map(loc => <option key={loc} value={loc}>{loc}</option>)}
+          </select>
+          <button 
+            type="button" 
+            className="btn btn-outline-primary fw-bold" 
+            onClick={() => { setIsNewLocation(true); setLocation(""); }}
+          >
+            ➕ Mới
+          </button>
+        </div>
+      ) : (
+        <div className="d-flex gap-2">
+          <input 
+            type="text" 
+            className="form-control form-control-lg bg-light border-primary" 
+            placeholder="VD: Kệ A1 - Tầng 2" 
+            value={location} 
+            onChange={(e) => setLocation(e.target.value)} 
+            onKeyDown={(e) => e.key === 'Enter' && onEnterSave()}
+            autoFocus={locationOptions.length > 0}
+          />
+          {locationOptions.length > 0 && (
+            <button 
+              type="button" 
+              className="btn btn-outline-secondary fw-bold" 
+              onClick={() => { setIsNewLocation(false); setLocation(locationOptions[0]); }}
+            >
+              Hủy
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
 
   const handleUpdateHistoryQty = async (rowIndex: number, currentQty: number) => {
     if (!isAdmin) return; 
@@ -637,7 +699,10 @@ export default function Home() {
                     else { 
                       setStep(2); 
                       loadProgress(store); 
-                      setLocation(localStorage.getItem(`kiemke_location_${store}`) || "");
+                      const opts = loadLocationOptions(store);
+                      setLocationOptions(opts);
+                      setLocation(opts[0] || "");
+                      setIsNewLocation(opts.length === 0);
                     } 
                   }}
                 >
@@ -849,17 +914,7 @@ export default function Home() {
                   />
                 </div>
 
-                <div className="mb-4">
-                  <label className="form-label fw-bold text-dark">📍 Vị trí lưu kho (kệ/dãy/tầng):</label>
-                  <input 
-                    type="text" 
-                    className="form-control form-control-lg bg-light border-primary" 
-                    placeholder="VD: Kệ A1 - Tầng 2" 
-                    value={location} 
-                    onChange={(e) => setLocation(e.target.value)} 
-                    onKeyDown={(e) => e.key === 'Enter' && handleSave()}
-                  />
-                </div>
+                {renderLocationField(handleSave)}
                 
                 <div className="d-flex gap-3">
                   <button className="btn btn-outline-secondary btn-lg flex-grow-1 fw-bold" onClick={() => setStep(2)} disabled={isSaving}>Hủy</button>
@@ -925,17 +980,7 @@ export default function Home() {
                   </div>
                 </div>
 
-                <div className="mb-3">
-                  <label className="form-label fw-bold">📍 Vị trí lưu kho (kệ/dãy/tầng):</label>
-                  <input 
-                    type="text" 
-                    className="form-control form-control-lg bg-light border-primary" 
-                    placeholder="VD: Kệ A1 - Tầng 2" 
-                    value={location} 
-                    onChange={(e) => setLocation(e.target.value)} 
-                    onKeyDown={(e) => e.key === 'Enter' && handleSaveOutside()}
-                  />
-                </div>
+                {renderLocationField(handleSaveOutside)}
                 
                 <div className="d-flex gap-3 mt-4">
                   <button className="btn btn-outline-secondary btn-lg flex-grow-1 fw-bold" onClick={() => setStep(2)} disabled={isSaving}>Hủy</button>
