@@ -65,6 +65,7 @@ export default function Home() {
   const searchInputRef = useRef<HTMLInputElement>(null);
   const scannerRef = useRef<any>(null);
   const scanLockRef = useRef<boolean>(false);
+  const scanSessionRef = useRef<number>(0);
 
   // Chỉ vài kho lớn cần theo dõi vị trí cụ thể -> lưu danh sách vị trí đã dùng theo từng kho để chọn nhanh lại
   const loadLocationOptions = (storeName: string): string[] => {
@@ -278,6 +279,7 @@ export default function Home() {
   };
 
   const stopScanner = async () => {
+    scanSessionRef.current += 1;
     const scanner = scannerRef.current;
     if (scanner) {
       try {
@@ -298,6 +300,7 @@ export default function Home() {
 
     setIsScanningLive(true);
     scanLockRef.current = false;
+    const scanSession = ++scanSessionRef.current;
 
     // Chờ khung camera thực sự có kích thước trên màn hình rồi mới khởi động quét
     // (một số máy Android như Oppo/ColorOS render layout chậm hơn, đo kích thước quá sớm khiến camera không mở được)
@@ -326,6 +329,7 @@ export default function Home() {
     // Chạy ngay ở khung hình kế tiếp (thay vì chờ 300ms) để giữ nguyên "user gesture" của thao tác chạm, tránh bị iOS chặn autoplay
     requestAnimationFrame(async () => {
       try {
+        if (scanSession !== scanSessionRef.current) return;
         const { Html5Qrcode, Html5QrcodeSupportedFormats } = await import('html5-qrcode');
 
         // Dùng lại đúng 1 instance để tránh rò rỉ luồng camera (nguyên nhân Safari/iOS từ chối cấp quyền camera sau vài lần bật/tắt)
@@ -350,6 +354,7 @@ export default function Home() {
         const scanner = scannerRef.current;
 
         await waitForContainerSize("reader-container");
+        if (scanSession !== scanSessionRef.current) return;
 
         // Mở camera bằng constraint tối giản trước; nâng độ phân giải sau khi stream đã chạy để tránh lỗi Oppo/iOS.
         const videoConstraints = {};
@@ -372,7 +377,7 @@ export default function Home() {
 
         const onScanSuccess = (decodedText: string) => {
           // Chặn xử lý trùng lặp khi camera bắt được nhiều khung hình liên tiếp cùng 1 mã
-          if (scanLockRef.current) return;
+          if (scanSession !== scanSessionRef.current || scanLockRef.current) return;
           scanLockRef.current = true;
 
           if (navigator.vibrate) navigator.vibrate(120);
@@ -414,7 +419,7 @@ export default function Home() {
             try {
               await scanner.start({ deviceId: { exact: rearCamera.id }, ...videoConstraints }, scanConfig, onScanSuccess, () => {});
               return;
-            } catch (deviceError) {
+            } catch {
               // Cuối cùng bỏ độ phân giải lý tưởng; một số Oppo/ColorOS chỉ chấp nhận constraint camera tối giản.
               await scanner.start({ deviceId: { exact: rearCamera.id } }, scanConfig, onScanSuccess, () => {});
             }
@@ -422,10 +427,16 @@ export default function Home() {
         };
 
         await startCamera();
+        if (scanSession !== scanSessionRef.current) {
+          try {
+            if (scanner.getState() === 2 || scanner.getState() === 3) await scanner.stop();
+          } catch {}
+          return;
+        }
 
         try {
           await scanner.applyVideoConstraints(qualityConstraints);
-        } catch (qualityError) {}
+        } catch {}
 
         // Autofocus là best-effort: chỉ áp dụng sau khi camera đã chạy để không làm hỏng getUserMedia trên iOS/ColorOS.
         try {
@@ -433,13 +444,14 @@ export default function Home() {
           if (capabilities && 'focusMode' in capabilities) {
             await scanner.applyVideoConstraints({ advanced: [{ focusMode: "continuous" }] });
           }
-        } catch (focusError) {}
+        } catch {}
 
         forcePlayVideo();
         // Thử lại play() thêm vài nhịp phòng khi frame đầu chưa kịp gắn thẻ <video> vào DOM
         setTimeout(forcePlayVideo, 150);
         setTimeout(forcePlayVideo, 500);
-      } catch (err: any) {
+      } catch {
+        if (scanSession !== scanSessionRef.current) return;
         setIsScanningLive(false);
         // Trình duyệt vẫn có thể hỏi quyền lần đầu; nếu bị từ chối/không có camera thì quay thẳng về nhập tay.
         setStep(2);
@@ -554,7 +566,7 @@ export default function Home() {
             className="btn btn-outline-primary fw-bold" 
             onClick={() => { setIsNewLocation(true); setLocation(""); }}
           >
-            ➕ Mới
+            Đổi vị trí
           </button>
         </div>
       ) : (
