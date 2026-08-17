@@ -299,6 +299,21 @@ export default function Home() {
     setIsScanningLive(true);
     scanLockRef.current = false;
 
+    // Chờ khung camera thực sự có kích thước trên màn hình rồi mới khởi động quét
+    // (một số máy Android như Oppo/ColorOS render layout chậm hơn, đo kích thước quá sớm khiến camera không mở được)
+    const waitForContainerSize = (elementId: string, maxWaitMs = 1500): Promise<void> => {
+      const startTime = Date.now();
+      return new Promise((resolve) => {
+        const check = () => {
+          const el = document.getElementById(elementId);
+          if (el && el.clientWidth > 0 && el.clientHeight > 0) return resolve();
+          if (Date.now() - startTime > maxWaitMs) return resolve();
+          requestAnimationFrame(check);
+        };
+        check();
+      });
+    };
+
     setTimeout(async () => {
       try {
         const { Html5Qrcode, Html5QrcodeSupportedFormats } = await import('html5-qrcode');
@@ -324,51 +339,60 @@ export default function Home() {
         }
         const scanner = scannerRef.current;
 
-        await scanner.start(
-          { facingMode: "environment" },
-          {
-            fps: 15,
-            // qrbox tính theo % khung hình, có giới hạn tối thiểu để tránh khung quét quá nhỏ/méo khi layout chưa ổn định
-            qrbox: (viewfinderWidth: number, viewfinderHeight: number) => {
-              const minSide = Math.min(viewfinderWidth, viewfinderHeight);
-              const size = Math.max(220, Math.floor(minSide * 0.75));
-              return { width: size, height: Math.floor(size * 0.5) };
-            },
-            disableFlip: false,
+        await waitForContainerSize("reader-container");
+
+        const scanConfig = {
+          fps: 15,
+          // qrbox tính theo % khung hình, có giới hạn tối thiểu để tránh khung quét quá nhỏ/méo khi layout chưa ổn định
+          qrbox: (viewfinderWidth: number, viewfinderHeight: number) => {
+            const minSide = Math.min(viewfinderWidth, viewfinderHeight);
+            const size = Math.max(Math.min(220, minSide || 220), Math.floor(minSide * 0.75));
+            return { width: size, height: Math.floor(size * 0.5) };
           },
-          (decodedText: string) => {
-            // Chặn xử lý trùng lặp khi camera bắt được nhiều khung hình liên tiếp cùng 1 mã
-            if (scanLockRef.current) return;
-            scanLockRef.current = true;
+          disableFlip: false,
+        };
 
-            if (navigator.vibrate) navigator.vibrate(120);
-            playBeep();
-            try { scanner.pause(true); } catch (e) {}
+        const onScanSuccess = (decodedText: string) => {
+          // Chặn xử lý trùng lặp khi camera bắt được nhiều khung hình liên tiếp cùng 1 mã
+          if (scanLockRef.current) return;
+          scanLockRef.current = true;
 
-            const qCode = decodedText.toLowerCase().trim().replace(/[^a-z0-9]/g, '');
-            const found = data.danhMuc.find((row: any) => {
-              let ma = String(row[0]).toLowerCase().trim().replace(/[^a-z0-9]/g, '');
-              let maVach = String(row[2] || "").toLowerCase().trim();
-              if (maVach.endsWith('.0')) maVach = maVach.slice(0, -2);
-              const maVachClean = maVach.replace(/[^a-z0-9]/g, '');
-              return ma === qCode || maVachClean === qCode || maVachClean.endsWith(qCode);
-            });
+          if (navigator.vibrate) navigator.vibrate(120);
+          playBeep();
+          try { scanner.pause(true); } catch (e) {}
 
-            stopScanner();
+          const qCode = decodedText.toLowerCase().trim().replace(/[^a-z0-9]/g, '');
+          const found = data.danhMuc.find((row: any) => {
+            let ma = String(row[0]).toLowerCase().trim().replace(/[^a-z0-9]/g, '');
+            let maVach = String(row[2] || "").toLowerCase().trim();
+            if (maVach.endsWith('.0')) maVach = maVach.slice(0, -2);
+            const maVachClean = maVach.replace(/[^a-z0-9]/g, '');
+            return ma === qCode || maVachClean === qCode || maVachClean.endsWith(qCode);
+          });
 
-            if (found) {
-              selectProduct(found);
-            } else {
-              setOutsideBarcode(decodedText);
-              setOutsideName("");
-              setOutsideUnit("Cái");
-              setOutsideQty("");
-              setStep(4);
-              checkCounted(decodedText);
-            }
-          },
-          () => {} // Bỏ qua lỗi giải mã từng khung hình (bình thường khi đang canh mã)
-        );
+          stopScanner();
+
+          if (found) {
+            selectProduct(found);
+          } else {
+            setOutsideBarcode(decodedText);
+            setOutsideName("");
+            setOutsideUnit("Cái");
+            setOutsideQty("");
+            setStep(4);
+            checkCounted(decodedText);
+          }
+        };
+
+        try {
+          await scanner.start({ facingMode: "environment" }, scanConfig, onScanSuccess, () => {});
+        } catch (facingModeErr) {
+          // Một số máy Android (Oppo/Realme/Vivo...) xử lý facingMode không ổn định -> dò camera sau (rear) theo deviceId thay thế
+          const cameras = await Html5Qrcode.getCameras();
+          if (!cameras || cameras.length === 0) throw facingModeErr;
+          const rearCamera = cameras.find((c: any) => /back|rear|environment/i.test(c.label)) || cameras[cameras.length - 1];
+          await scanner.start({ deviceId: { exact: rearCamera.id } }, scanConfig, onScanSuccess, () => {});
+        }
       } catch (err: any) {
         setIsScanningLive(false);
         if (err?.name === 'NotAllowedError') {
