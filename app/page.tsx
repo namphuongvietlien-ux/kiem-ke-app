@@ -346,10 +346,7 @@ export default function Home() {
         if (!scannerRef.current) {
           scannerRef.current = new Html5Qrcode("reader-container", {
             verbose: false,
-            // Ép dùng bộ giải mã zxing-js cho mọi trình duyệt thay vì BarcodeDetector gốc của Android
-            // (BarcodeDetector gốc kết hợp formatsToSupport tùy chỉnh gây quét không ra / quét sai mã trên nhiều máy Android)
-            useBarCodeDetectorIfSupported: false,
-            // Chỉ nhận diện định dạng mã vạch bán lẻ có checksum (không gồm ITF vì dễ đọc nhầm số do không có ký tự kiểm tra)
+            // Giữ cấu hình decoder tương thích với iOS/Samsung đã chạy ổn ở 1c00c0d.
             formatsToSupport: [
               Html5QrcodeSupportedFormats.EAN_13,
               Html5QrcodeSupportedFormats.EAN_8,
@@ -357,6 +354,7 @@ export default function Home() {
               Html5QrcodeSupportedFormats.UPC_E,
               Html5QrcodeSupportedFormats.CODE_128,
               Html5QrcodeSupportedFormats.CODE_39,
+              Html5QrcodeSupportedFormats.ITF,
               Html5QrcodeSupportedFormats.QR_CODE,
             ],
           });
@@ -364,22 +362,15 @@ export default function Home() {
         const scanner = scannerRef.current;
         if (scanSession !== scanSessionRef.current) return;
 
-        // Mở camera bằng constraint tối giản trước; nâng độ phân giải sau khi stream đã chạy để tránh lỗi Oppo/iOS.
         const videoConstraints = {};
-        const qualityConstraints = {
-          width: { ideal: 1920 },
-          height: { ideal: 1080 },
-        };
 
         const scanConfig = {
-          fps: 18,
-          // Khung quét hình chữ nhật dẹt (rộng, thấp) khớp với mã vạch 1D (EAN/UPC/CODE128) thay vì khung vuông
-          // -> loại bớt nhiễu chữ phía trên/dưới mã, đồng thời vẫn tính theo % màn hình để không vỡ layout máy nhỏ
+          fps: 15,
           qrbox: (viewfinderWidth: number, viewfinderHeight: number) => {
-            const width = Math.max(220, Math.min(Math.floor(viewfinderWidth * 0.85), 500));
-            const height = Math.max(90, Math.floor(width * 0.35));
-            return { width, height: Math.min(height, viewfinderHeight) };
+            const size = Math.floor(Math.min(viewfinderWidth, viewfinderHeight) * 0.75);
+            return { width: size, height: Math.floor(size * 0.55) };
           },
+          aspectRatio: 1.777778,
           disableFlip: false,
         };
 
@@ -434,28 +425,6 @@ export default function Home() {
           } catch {}
           return;
         }
-
-        try {
-          await scanner.applyVideoConstraints(qualityConstraints);
-        } catch {}
-
-        // Zoom nhẹ nếu phần cứng hỗ trợ giúp mã nhỏ chiếm nhiều pixel hơn mà không làm hỏng camera không có zoom.
-        try {
-          const cameraCapabilities = scanner.getRunningTrackCameraCapabilities();
-          const zoomFeature = cameraCapabilities.zoomFeature();
-          if (zoomFeature.isSupported()) {
-            const zoom = Math.min(1.5, zoomFeature.max());
-            if (zoom > zoomFeature.min()) await zoomFeature.apply(zoom);
-          }
-        } catch {}
-
-        // Autofocus là best-effort: chỉ áp dụng khi thiết bị khai báo rõ ràng hỗ trợ continuous.
-        try {
-          const capabilities = scanner.getRunningTrackCapabilities() as MediaTrackCapabilities & { focusMode?: string[] };
-          if (capabilities.focusMode?.includes("continuous")) {
-            await scanner.applyVideoConstraints({ advanced: [{ focusMode: "continuous" }] });
-          }
-        } catch {}
 
         forcePlayVideo();
         // Thử lại play() thêm vài nhịp phòng khi frame đầu chưa kịp gắn thẻ <video> vào DOM
