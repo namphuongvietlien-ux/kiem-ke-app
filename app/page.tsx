@@ -260,6 +260,29 @@ export default function Home() {
     checkCounted(maHang);
   };
 
+  const normalizeScanCode = (value: unknown): string => {
+    let rawValue = String(value || "").trim().toLowerCase();
+    if (rawValue.endsWith(".0")) rawValue = rawValue.slice(0, -2);
+    return rawValue.replace(/[^a-z0-9]/g, "");
+  };
+
+  const findScannedProduct = (decodedText: string) => {
+    const scannedCode = normalizeScanCode(decodedText);
+    if (!scannedCode) return null;
+
+    const exactMatches = data.danhMuc.filter((row: any) => {
+      const productCode = normalizeScanCode(row[0]);
+      const barcode = normalizeScanCode(row[2]);
+      return productCode === scannedCode || barcode === scannedCode;
+    });
+    if (exactMatches.length === 1) return exactMatches[0];
+
+    // Chỉ cho phép hậu tố đủ dài và duy nhất, tránh nhảy nhầm khi decoder trả mã ngắn.
+    if (scannedCode.length < 8) return null;
+    const suffixMatches = data.danhMuc.filter((row: any) => normalizeScanCode(row[2]).endsWith(scannedCode));
+    return suffixMatches.length === 1 ? suffixMatches[0] : null;
+  };
+
   // Phát tiếng "bíp" ngắn giống máy quét mã vạch siêu thị (Web Audio API, chạy tốt trên iOS/Android)
   const playBeep = () => {
     try {
@@ -384,14 +407,7 @@ export default function Home() {
           playBeep();
           try { scanner.pause(true); } catch (e) {}
 
-          const qCode = decodedText.toLowerCase().trim().replace(/[^a-z0-9]/g, '');
-          const found = data.danhMuc.find((row: any) => {
-            let ma = String(row[0]).toLowerCase().trim().replace(/[^a-z0-9]/g, '');
-            let maVach = String(row[2] || "").toLowerCase().trim();
-            if (maVach.endsWith('.0')) maVach = maVach.slice(0, -2);
-            const maVachClean = maVach.replace(/[^a-z0-9]/g, '');
-            return ma === qCode || maVachClean === qCode || maVachClean.endsWith(qCode);
-          });
+          const found = findScannedProduct(decodedText);
 
           stopScanner();
 
@@ -438,10 +454,20 @@ export default function Home() {
           await scanner.applyVideoConstraints(qualityConstraints);
         } catch {}
 
-        // Autofocus là best-effort: chỉ áp dụng sau khi camera đã chạy để không làm hỏng getUserMedia trên iOS/ColorOS.
+        // Zoom nhẹ nếu phần cứng hỗ trợ giúp mã nhỏ chiếm nhiều pixel hơn mà không làm hỏng camera không có zoom.
         try {
-          const capabilities = scanner.getRunningTrackCapabilities();
-          if (capabilities && 'focusMode' in capabilities) {
+          const cameraCapabilities = scanner.getRunningTrackCameraCapabilities();
+          const zoomFeature = cameraCapabilities.zoomFeature();
+          if (zoomFeature.isSupported()) {
+            const zoom = Math.min(1.5, zoomFeature.max());
+            if (zoom > zoomFeature.min()) await zoomFeature.apply(zoom);
+          }
+        } catch {}
+
+        // Autofocus là best-effort: chỉ áp dụng khi thiết bị khai báo rõ ràng hỗ trợ continuous.
+        try {
+          const capabilities = scanner.getRunningTrackCapabilities() as MediaTrackCapabilities & { focusMode?: string[] };
+          if (capabilities.focusMode?.includes("continuous")) {
             await scanner.applyVideoConstraints({ advanced: [{ focusMode: "continuous" }] });
           }
         } catch {}
